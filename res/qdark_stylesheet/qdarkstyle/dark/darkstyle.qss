@@ -1,0 +1,5 @@
+﻿/* Dark style placeholder */
+QMainWindow {
+    background-color: #323232;
+    color: #ffffff;
+}
