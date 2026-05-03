@@ -922,6 +922,9 @@ void MainWindow::readData()
 
         // распаковываем по 3 байта (MSB first — как у тебя MCU)
         int nvals = payload.size() / 3;
+        if (nvals != 4) {
+            return;
+        }
         QStringList incomingData;
         for (int k = 0; k < nvals; ++k) {
             int off = k * 3;
@@ -937,7 +940,7 @@ void MainWindow::readData()
             incomingData << QString::number(val);
         }
 
-        //qDebug()<<"nvals = "<<nvals;
+        qDebug()<<"nvals = "<<nvals;
 
         // выводим в окно (если нужно) и эмитим сигнал
         int sz = 7;
@@ -1380,6 +1383,7 @@ void MainWindow::on_pushButton_AutoScale_clicked()
 
 void MainWindow::calculate(double value1, double value2, double value3) {
     ui->textEdit_UartWindow->append("calculate");
+    qDebug() << "calculate: " << value1 << " " << value2 << " " << value3 << "\n";
     if (need_calculate_number == 3) {
         if (value3 > 1e6) {
             green_idx_ = -1;
@@ -1550,9 +1554,9 @@ void MainWindow::on_actionSend_triggered()
     QByteArray pack;
     auto sendCmd = [&](uint8_t addr, uint32_t val) {
         QByteArray frame;
-        frame.append(static_cast<char>(0x40));
+        frame.append(static_cast<char>(addr));
         frame.append(makeArray(val));
-        qDebug() << frame;
+        qDebug() << "FRAME: " << addr << " " << val;
         for (int i=0; i<4; i++)
         {
             serialPort->write(&frame[i], 1);
