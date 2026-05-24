@@ -82,10 +82,10 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
 
     // 3. Нормализация AC компоненты и детектирование пиков
     QVector<int> peaks;
-    double maxValue = 0;
+    double maxValue = acComponent[dcFilterWindowSize / 2];
     double minValue = acComponent[dcFilterWindowSize / 2];
 
-    // Находим диапазон значений для нормализации
+    // Находим реальный диапазон значений
     for (int i = dcFilterWindowSize / 2; i < sampleCount - dcFilterWindowSize / 2; ++i)
     {
         if (acComponent[i] > maxValue)
@@ -95,10 +95,15 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     double amplitude = maxValue - minValue;
+    qDebug() << "[HR] amplitude=" << amplitude << "maxValue=" << maxValue << "minValue=" << minValue;
     if (amplitude < 100)
-        return 0; // Слишком маленькая амплитуда - плохой сигнал
+    {
+        qDebug() << "[HR] rejected: amplitude too small";
+        return 0;
+    }
 
-    double threshold = 0.3 * amplitude;          // Порог для детектирования пиков
+    // Порог — верхние 30% диапазона (работает и для инвертированного сигнала)
+    double threshold = minValue + 0.7 * amplitude;
     double minPeakDistance = 0.4 * samplingRate; // Минимальное расстояние между пиками ~250 мс
 
     int lastPeakIndex = -minPeakDistance;
@@ -106,13 +111,10 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     // Ищем локальные максимумы, превышающие порог
     for (int i = dcFilterWindowSize / 2 + 1; i < sampleCount - dcFilterWindowSize / 2 - 1; ++i)
     {
-        // Проверяем, является ли точка локальным максимумом
         if (acComponent[i] > acComponent[i - 1] &&
             acComponent[i] > acComponent[i + 1] &&
             acComponent[i] > threshold)
         {
-
-            // Проверяем минимальное расстояние до предыдущего пика
             if (i - lastPeakIndex >= minPeakDistance)
             {
                 peaks.append(i);
@@ -122,8 +124,12 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     // 4. Расчет ЧСС по последним пикам
+    qDebug() << "[HR] peaks found:" << peaks.size() << peaks;
     if (peaks.size() < 2)
-        return 0; // Недостаточно пиков для расчета
+    {
+        qDebug() << "[HR] rejected: not enough peaks";
+        return 0;
+    }
 
     // Рассчитываем средний интервал между пиками (RR-интервал)
     double avgRRInterval = 0;
@@ -214,7 +220,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
     timer->start(100); // Запуск таймера с интервалом 100 мс
 
     data_vector.assign(3, std::vector<double>(30));
-    green_samples.resize(500);
+    green_samples.resize(80);
 
     /* Wheel over plot when plotting */
     connect(ui->plot, SIGNAL(mouseWheel(QWheelEvent *)), this, SLOT(on_mouse_wheel_in_plot(QWheelEvent *)));
@@ -276,6 +282,10 @@ void MainWindow::createUI()
     enable_com_controls(true);
     ui->savePNGButton->setEnabled(false);
     ui->statusBar->showMessage("Run ble_bridge.py, then select 'localhost' and click Connect.");
+
+    m_heartRateLabel = new QLabel("HR: --  ", this);
+    m_heartRateLabel->setStyleSheet("color: #fb4934; font-weight: bold; padding-right: 6px;");
+    ui->statusBar->addPermanentWidget(m_heartRateLabel);
 
     /* Populate baud rate combo box with standard rates */
     ui->comboBaud->addItem("1200");
@@ -1138,17 +1148,26 @@ void MainWindow::processData(const QByteArray &data)
             data_vector[ii][idx_] = incomingData[ii].toDouble();
         }
 
-        if (0 <= green_idx_ && green_idx_ < 500)
+        if (0 <= green_idx_ && green_idx_ < 80)
         {
             green_samples[green_idx_] = incomingData[2].toDouble();
             green_idx_++;
+            if (green_idx_ % 10 == 0)
+                qDebug() << "[HR] collecting, green_idx_=" << green_idx_
+                         << "last sample=" << green_samples[green_idx_-1];
         }
 
-        if (green_idx_ == 500)
+        if (green_idx_ == 80)
         {
-            auto heart_rate = calculateHeartRate(green_samples, 500, 100);
-            qDebug() << "Пульс " << heart_rate;
+            auto heart_rate = calculateHeartRate(green_samples, 80, 10);
+            qDebug() << "[HR] calculateHeartRate returned:" << heart_rate;
             green_idx_ = 0;
+            if (m_heartRateLabel) {
+                if (heart_rate > 0)
+                    m_heartRateLabel->setText(QString("HR: %1 bpm  ").arg(heart_rate));
+                else
+                    m_heartRateLabel->setText("HR: --  ");
+            }
         }
 
         if (idx_ == 0)

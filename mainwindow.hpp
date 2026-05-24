@@ -43,6 +43,7 @@
 #include "qcustomplot/qcustomplot.h"
 #include <QTimer>
 #include <QDateTime>
+#include <QLabel>
 
 #define START_MSG       '$'
 #define END_MSG         ';'
@@ -235,6 +236,7 @@ private:
 
     std::vector<int> green_samples;
     int green_idx_ = -1;
+    QLabel *m_heartRateLabel = nullptr;
 };
 
 
