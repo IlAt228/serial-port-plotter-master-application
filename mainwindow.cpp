@@ -29,9 +29,9 @@
 #include "LEDManager.h"
 
 const QBluetoothUuid MainWindow::NUS_SERVICE_UUID{QString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")};
-const QBluetoothUuid MainWindow::NUS_TX_UUID     {QString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")};
-const QBluetoothUuid MainWindow::NUS_RX_UUID     {QString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")};
-//#include <x86intrin.h>
+const QBluetoothUuid MainWindow::NUS_TX_UUID{QString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")};
+const QBluetoothUuid MainWindow::NUS_RX_UUID{QString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")};
+// #include <x86intrin.h>
 
 /**
  * @brief Вычисление частоты сердечных сокращений (ЧСС) из данных AFE4404
@@ -40,22 +40,27 @@ const QBluetoothUuid MainWindow::NUS_RX_UUID     {QString("6E400002-B5A3-F393-E0
  * @param samplingRate Частота дискретизации в Гц
  * @return Частота сердечных сокращений в ударах в минуту (0 при недостаточном качестве сигнала)
  */
-int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float samplingRate) {
-    if (sampleCount < 50 || samplingRate <= 0) return 0;
+int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float samplingRate)
+{
+    if (sampleCount < 50 || samplingRate <= 0)
+        return 0;
 
     // 1. Предварительная фильтрация: скользящее среднее для подавления высокочастотных шумов
     QVector<double> filteredSignal(sampleCount);
     const int filterWindowSize = 3; // Небольшое окно для сохранения формы сигнала
 
-    for (int i = filterWindowSize/2; i < sampleCount - filterWindowSize/2; ++i) {
+    for (int i = filterWindowSize / 2; i < sampleCount - filterWindowSize / 2; ++i)
+    {
         double sum = 0;
-        for (int j = -filterWindowSize/2; j <= filterWindowSize/2; ++j) {
+        for (int j = -filterWindowSize / 2; j <= filterWindowSize / 2; ++j)
+        {
             sum += irSamples[i + j];
         }
         filteredSignal[i] = sum / filterWindowSize;
     }
     // Копируем краевые значения
-    for (int i = 0; i < filterWindowSize/2; ++i) {
+    for (int i = 0; i < filterWindowSize / 2; ++i)
+    {
         filteredSignal[i] = irSamples[i];
         filteredSignal[sampleCount - 1 - i] = irSamples[sampleCount - 1 - i];
     }
@@ -64,9 +69,11 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     QVector<double> acComponent(sampleCount);
     const int dcFilterWindowSize = static_cast<int>(samplingRate); // Окно ~1 сек для выделения DC
 
-    for (int i = dcFilterWindowSize/2; i < sampleCount - dcFilterWindowSize/2; ++i) {
+    for (int i = dcFilterWindowSize / 2; i < sampleCount - dcFilterWindowSize / 2; ++i)
+    {
         double dcSum = 0;
-        for (int j = -dcFilterWindowSize/2; j <= dcFilterWindowSize/2; ++j) {
+        for (int j = -dcFilterWindowSize / 2; j <= dcFilterWindowSize / 2; ++j)
+        {
             dcSum += filteredSignal[i + j];
         }
         double dcValue = dcSum / dcFilterWindowSize;
@@ -76,31 +83,38 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     // 3. Нормализация AC компоненты и детектирование пиков
     QVector<int> peaks;
     double maxValue = 0;
-    double minValue = acComponent[dcFilterWindowSize/2];
+    double minValue = acComponent[dcFilterWindowSize / 2];
 
     // Находим диапазон значений для нормализации
-    for (int i = dcFilterWindowSize/2; i < sampleCount - dcFilterWindowSize/2; ++i) {
-        if (acComponent[i] > maxValue) maxValue = acComponent[i];
-        if (acComponent[i] < minValue) minValue = acComponent[i];
+    for (int i = dcFilterWindowSize / 2; i < sampleCount - dcFilterWindowSize / 2; ++i)
+    {
+        if (acComponent[i] > maxValue)
+            maxValue = acComponent[i];
+        if (acComponent[i] < minValue)
+            minValue = acComponent[i];
     }
 
     double amplitude = maxValue - minValue;
-    if (amplitude < 100) return 0; // Слишком маленькая амплитуда - плохой сигнал
+    if (amplitude < 100)
+        return 0; // Слишком маленькая амплитуда - плохой сигнал
 
-    double threshold = 0.3 * amplitude; // Порог для детектирования пиков
+    double threshold = 0.3 * amplitude;          // Порог для детектирования пиков
     double minPeakDistance = 0.4 * samplingRate; // Минимальное расстояние между пиками ~250 мс
 
     int lastPeakIndex = -minPeakDistance;
 
     // Ищем локальные максимумы, превышающие порог
-    for (int i = dcFilterWindowSize/2 + 1; i < sampleCount - dcFilterWindowSize/2 - 1; ++i) {
+    for (int i = dcFilterWindowSize / 2 + 1; i < sampleCount - dcFilterWindowSize / 2 - 1; ++i)
+    {
         // Проверяем, является ли точка локальным максимумом
-        if (acComponent[i] > acComponent[i-1] &&
-            acComponent[i] > acComponent[i+1] &&
-            acComponent[i] > threshold) {
+        if (acComponent[i] > acComponent[i - 1] &&
+            acComponent[i] > acComponent[i + 1] &&
+            acComponent[i] > threshold)
+        {
 
             // Проверяем минимальное расстояние до предыдущего пика
-            if (i - lastPeakIndex >= minPeakDistance) {
+            if (i - lastPeakIndex >= minPeakDistance)
+            {
                 peaks.append(i);
                 lastPeakIndex = i;
             }
@@ -108,7 +122,8 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     // 4. Расчет ЧСС по последним пикам
-    if (peaks.size() < 2) return 0; // Недостаточно пиков для расчета
+    if (peaks.size() < 2)
+        return 0; // Недостаточно пиков для расчета
 
     // Рассчитываем средний интервал между пиками (RR-интервал)
     double avgRRInterval = 0;
@@ -116,111 +131,112 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     const int maxPeaksToUse = 5; // Используем не более 5 последних пиков для расчета
 
     int startIndex = qMax(0, static_cast<int>(peaks.size()) - maxPeaksToUse);
-    for (int i = startIndex; i < peaks.size() - 1; ++i) {
-        avgRRInterval += (peaks[i+1] - peaks[i]);
+    for (int i = startIndex; i < peaks.size() - 1; ++i)
+    {
+        avgRRInterval += (peaks[i + 1] - peaks[i]);
         peakCount++;
     }
 
-    avgRRInterval /= peakCount; // Средний RR-интервал в отсчетах
+    avgRRInterval /= peakCount;                              // Средний RR-интервал в отсчетах
     double rrIntervalSeconds = avgRRInterval / samplingRate; // RR-интервал в секундах
 
     // Преобразуем в ЧСС (уд/мин)
     double heartRate = 60.0 / rrIntervalSeconds;
 
     // Проверка на физиологически возможные значения
-    if (heartRate < 40.0) {
-        //return 0;
+    if (heartRate < 40.0)
+    {
+        // return 0;
     }
 
-    if (heartRate > 200.0) {
-        //return 0;
+    if (heartRate > 200.0)
+    {
+        // return 0;
     }
 
     return static_cast<int>(qRound(heartRate));
 }
 
-
 /**
  * @brief Constructor
  * @param parent
  */
-MainWindow::MainWindow (QWidget *parent) :
-  QMainWindow (parent),
-  ui (new Ui::MainWindow),
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
+                                          ui(new Ui::MainWindow),
 
-  /* Populate colors */
-  line_colors{
-      /* For channel data (gruvbox palette) */
-      /* Light */
-      QColor ("#fb4934"), //R
-      QColor ("#fabd2f"),//("#b8bb26"), //IR
-      QColor ("#8ec07c"), //("#fabd2f"), //G
-      QColor ("#83a598"), //Ambient
-      QColor ("#d3869b"),
-      QColor ("#8ec07c"),
-      QColor ("#fe8019"),
-      /* Light */
-      QColor ("#cc241d"),
-      QColor ("#98971a"),
-      QColor ("#d79921"),
-      QColor ("#458588"),
-      QColor ("#b16286"),
-      QColor ("#689d6a"),
-      QColor ("#d65d0e"),
-   },
-  gui_colors {
-      /* Monochromatic for axes and ui */
-      QColor (48,  47,  47,  255), /**<  0: qdark ui dark/background color */
-      QColor (80,  80,  80,  255), /**<  1: qdark ui medium/grid color */
-      QColor (170, 170, 170, 255), /**<  2: qdark ui light/text color */
-      QColor (48,  47,  47,  200)  /**<  3: qdark ui dark/background color w/transparency */
-    },
+                                          /* Populate colors */
+                                          line_colors{
+                                              /* For channel data (gruvbox palette) */
+                                              /* Light */
+                                              QColor("#fb4934"), // R
+                                              QColor("#fabd2f"), //("#b8bb26"), //IR
+                                              QColor("#8ec07c"), //("#fabd2f"), //G
+                                              QColor("#83a598"), // Ambient
+                                              QColor("#d3869b"),
+                                              QColor("#8ec07c"),
+                                              QColor("#fe8019"),
+                                              /* Light */
+                                              QColor("#cc241d"),
+                                              QColor("#98971a"),
+                                              QColor("#d79921"),
+                                              QColor("#458588"),
+                                              QColor("#b16286"),
+                                              QColor("#689d6a"),
+                                              QColor("#d65d0e"),
+                                          },
+                                          gui_colors{
+                                              /* Monochromatic for axes and ui */
+                                              QColor(48, 47, 47, 255),    /**<  0: qdark ui dark/background color */
+                                              QColor(80, 80, 80, 255),    /**<  1: qdark ui medium/grid color */
+                                              QColor(170, 170, 170, 255), /**<  2: qdark ui light/text color */
+                                              QColor(48, 47, 47, 200)     /**<  3: qdark ui dark/background color w/transparency */
+                                          },
 
-  /* Main vars */
-  connected (false),
-  plotting (false),
-  dataPointNumber (0),
-  channels(0),
-  serialPort (nullptr),
-  STATE (WAIT_START),
-  NUMBER_OF_POINTS (500)
+                                          /* Main vars */
+                                          connected(false),
+                                          plotting(false),
+                                          dataPointNumber(0),
+                                          channels(0),
+                                          serialPort(nullptr),
+                                          STATE(WAIT_START),
+                                          NUMBER_OF_POINTS(500)
 {
-  ui->setupUi (this);
+    ui->setupUi(this);
 
-  /* Init UI and populate UI controls */
-  createUI();
+    /* Init UI and populate UI controls */
+    createUI();
 
-  /* Setup plot area and connect controls slots */
-  setupPlot();
+    /* Setup plot area and connect controls slots */
+    setupPlot();
 
-  timer = new QTimer(this);
-  connect(timer, &QTimer::timeout, this, &MainWindow::onTimeout);
-  timer->start(100); // Запуск таймера с интервалом 100 мс
+    timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, &MainWindow::onTimeout);
+    timer->start(100); // Запуск таймера с интервалом 100 мс
 
-  data_vector.assign(3, std::vector<double>(30));
-  green_samples.resize(500);
+    data_vector.assign(3, std::vector<double>(30));
+    green_samples.resize(500);
 
-  /* Wheel over plot when plotting */
-  connect (ui->plot, SIGNAL (mouseWheel (QWheelEvent*)), this, SLOT (on_mouse_wheel_in_plot (QWheelEvent*)));
+    /* Wheel over plot when plotting */
+    connect(ui->plot, SIGNAL(mouseWheel(QWheelEvent *)), this, SLOT(on_mouse_wheel_in_plot(QWheelEvent *)));
 
-  /* Slot for printing coordinates */
-  connect (ui->plot, SIGNAL (mouseMove (QMouseEvent*)), this, SLOT (onMouseMoveInPlot (QMouseEvent*)));
+    /* Slot for printing coordinates */
+    connect(ui->plot, SIGNAL(mouseMove(QMouseEvent *)), this, SLOT(onMouseMoveInPlot(QMouseEvent *)));
 
-  /* Channel selection */
-  connect (ui->plot, SIGNAL(selectionChangedByUser()), this, SLOT(channel_selection()));
-  connect (ui->plot, SIGNAL(legendDoubleClick (QCPLegend*, QCPAbstractLegendItem*, QMouseEvent*)), this, SLOT(legend_double_click (QCPLegend*, QCPAbstractLegendItem*, QMouseEvent*)));
+    /* Channel selection */
+    connect(ui->plot, SIGNAL(selectionChangedByUser()), this, SLOT(channel_selection()));
+    connect(ui->plot, SIGNAL(legendDoubleClick(QCPLegend *, QCPAbstractLegendItem *, QMouseEvent *)), this, SLOT(legend_double_click(QCPLegend *, QCPAbstractLegendItem *, QMouseEvent *)));
 
-  /* Connect update timer to replot slot */
-  connect (&updateTimer, SIGNAL (timeout()), this, SLOT (replot()));
-    //settingsWindow = new AdvancedSettings(this);
-  //connect(settingsWindow, &AdvancedSettings::sendDataRequested,
-          //this, &MainWindow::onSendDataRequested);
-  m_csvFile = nullptr;
-  ui->main_Rf1->addItems(QStringList() << "500k" << "250k" << "100k" << "50k" << "25k" << "10k" << "1M" << "2M");
-  ui->main_Rf2->addItems(QStringList() << "500k" << "250k" << "100k" << "50k" << "25k" << "10k" << "1M" << "2M");
-  ui->main_Cf1->addItems(QStringList() << "5p" << "2.5p" << "10p" << "7.5p" << "20p" << "17.5p" << "25p" << "22.5p");
-  ui->main_Cf2->addItems(QStringList() << "5p" << "2.5p" << "10p" << "7.5p" << "20p" << "17.5p" << "25p" << "22.5p");
-  ui->main_checkSEP->setChecked(false);
+    /* Connect update timer to replot slot */
+    connect(&updateTimer, SIGNAL(timeout()), this, SLOT(replot()));
+    // settingsWindow = new AdvancedSettings(this);
+    // connect(settingsWindow, &AdvancedSettings::sendDataRequested,
+    // this, &MainWindow::onSendDataRequested);
+    m_csvFile = nullptr;
+    ui->main_Rf1->addItems(QStringList() << "500k" << "250k" << "100k" << "50k" << "25k" << "10k" << "1M" << "2M");
+    ui->main_Rf2->addItems(QStringList() << "500k" << "250k" << "100k" << "50k" << "25k" << "10k" << "1M" << "2M");
+    ui->main_Cf1->addItems(QStringList() << "5p" << "2.5p" << "10p" << "7.5p" << "20p" << "17.5p" << "25p" << "22.5p");
+    ui->main_Cf2->addItems(QStringList() << "5p" << "2.5p" << "10p" << "7.5p" << "20p" << "17.5p" << "25p" << "22.5p");
+    ui->main_checkSEP->setChecked(false);
 }
 bool COMopen = false;
 bool hardReset = true;
@@ -232,20 +248,21 @@ bool hardReset = true;
 MainWindow::~MainWindow()
 {
     closeCsvFile();
-      
-    if (bleController) bleController->disconnectFromDevice();
+
+    if (bleController)
+        bleController->disconnectFromDevice();
     delete ui;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 void MainWindow::onTimeout()
 {
-    if (QDateTime::currentMSecsSinceEpoch() - last_data_time > 100) {
+    if (QDateTime::currentMSecsSinceEpoch() - last_data_time > 100)
+    {
         ui->verticalSlider_4->setValue(1);
         ui->verticalSlider_4->setValue(0);
         qDebug() << "Таймер сработал!";
     }
-
 }
 
 /**
@@ -261,37 +278,37 @@ void MainWindow::createUI()
     ui->statusBar->showMessage("Run ble_bridge.py, then select 'localhost' and click Connect.");
 
     /* Populate baud rate combo box with standard rates */
-    ui->comboBaud->addItem ("1200");
-    ui->comboBaud->addItem ("2400");
-    ui->comboBaud->addItem ("4800");
-    ui->comboBaud->addItem ("9600");
-    ui->comboBaud->addItem ("19200");
-    ui->comboBaud->addItem ("38400");
-    ui->comboBaud->addItem ("57600");
-    ui->comboBaud->addItem ("115200");
+    ui->comboBaud->addItem("1200");
+    ui->comboBaud->addItem("2400");
+    ui->comboBaud->addItem("4800");
+    ui->comboBaud->addItem("9600");
+    ui->comboBaud->addItem("19200");
+    ui->comboBaud->addItem("38400");
+    ui->comboBaud->addItem("57600");
+    ui->comboBaud->addItem("115200");
     /* And some not-so-standard */
-    ui->comboBaud->addItem ("128000");
-    ui->comboBaud->addItem ("153600");
-    ui->comboBaud->addItem ("230400");
-    ui->comboBaud->addItem ("256000");
-    ui->comboBaud->addItem ("460800");
-    ui->comboBaud->addItem ("921600");
+    ui->comboBaud->addItem("128000");
+    ui->comboBaud->addItem("153600");
+    ui->comboBaud->addItem("230400");
+    ui->comboBaud->addItem("256000");
+    ui->comboBaud->addItem("460800");
+    ui->comboBaud->addItem("921600");
 
     /* Select 115200 bits by default */
-    ui->comboBaud->setCurrentIndex (7);
+    ui->comboBaud->setCurrentIndex(7);
 
     /* Populate data bits combo box */
-    ui->comboData->addItem ("8 bits");
-    ui->comboData->addItem ("7 bits");
+    ui->comboData->addItem("8 bits");
+    ui->comboData->addItem("7 bits");
 
     /* Populate parity combo box */
-    ui->comboParity->addItem ("none");
-    ui->comboParity->addItem ("odd");
-    ui->comboParity->addItem ("even");
+    ui->comboParity->addItem("none");
+    ui->comboParity->addItem("odd");
+    ui->comboParity->addItem("even");
 
     /* Populate stop bits combo box */
-    ui->comboStop->addItem ("1 bit");
-    ui->comboStop->addItem ("2 bits");
+    ui->comboStop->addItem("1 bit");
+    ui->comboStop->addItem("2 bits");
 
     /* Initialize the listwidget */
     ui->listWidget_Channels->clear();
@@ -307,61 +324,61 @@ void MainWindow::setupPlot()
     ui->plot->clearItems();
 
     /* Background for the plot area */
-    ui->plot->setBackground (gui_colors[0]);
+    ui->plot->setBackground(gui_colors[0]);
 
     /* Used for higher performance (see QCustomPlot real time example) */
-    ui->plot->setNotAntialiasedElements (QCP::aeAll);
+    ui->plot->setNotAntialiasedElements(QCP::aeAll);
     QFont font;
-    font.setStyleStrategy (QFont::NoAntialias);
-    ui->plot->legend->setFont (font);
+    font.setStyleStrategy(QFont::NoAntialias);
+    ui->plot->legend->setFont(font);
 
     /** See QCustomPlot examples / styled demo **/
     /* X Axis: Style */
-    ui->plot->xAxis->grid()->setPen (QPen(gui_colors[2], 1, Qt::DotLine));
-    ui->plot->xAxis->grid()->setSubGridPen (QPen(gui_colors[1], 1, Qt::DotLine));
-    ui->plot->xAxis->grid()->setSubGridVisible (true);
-    ui->plot->xAxis->setBasePen (QPen (gui_colors[2]));
-    ui->plot->xAxis->setTickPen (QPen (gui_colors[2]));
-    ui->plot->xAxis->setSubTickPen (QPen (gui_colors[2]));
-    ui->plot->xAxis->setUpperEnding (QCPLineEnding::esSpikeArrow);
-    ui->plot->xAxis->setTickLabelColor (gui_colors[2]);
-    ui->plot->xAxis->setTickLabelFont (font);
+    ui->plot->xAxis->grid()->setPen(QPen(gui_colors[2], 1, Qt::DotLine));
+    ui->plot->xAxis->grid()->setSubGridPen(QPen(gui_colors[1], 1, Qt::DotLine));
+    ui->plot->xAxis->grid()->setSubGridVisible(true);
+    ui->plot->xAxis->setBasePen(QPen(gui_colors[2]));
+    ui->plot->xAxis->setTickPen(QPen(gui_colors[2]));
+    ui->plot->xAxis->setSubTickPen(QPen(gui_colors[2]));
+    ui->plot->xAxis->setUpperEnding(QCPLineEnding::esSpikeArrow);
+    ui->plot->xAxis->setTickLabelColor(gui_colors[2]);
+    ui->plot->xAxis->setTickLabelFont(font);
     /* Range */
-    ui->plot->xAxis->setRange (dataPointNumber - ui->spinPoints->value(), dataPointNumber);
+    ui->plot->xAxis->setRange(dataPointNumber - ui->spinPoints->value(), dataPointNumber);
 
     /* Y Axis */
-    ui->plot->yAxis->grid()->setPen (QPen(gui_colors[2], 1, Qt::DotLine));
-    ui->plot->yAxis->grid()->setSubGridPen (QPen(gui_colors[1], 1, Qt::DotLine));
-    ui->plot->yAxis->grid()->setSubGridVisible (true);
-    ui->plot->yAxis->setBasePen (QPen (gui_colors[2]));
-    ui->plot->yAxis->setTickPen (QPen (gui_colors[2]));
-    ui->plot->yAxis->setSubTickPen (QPen (gui_colors[2]));
-    ui->plot->yAxis->setUpperEnding (QCPLineEnding::esSpikeArrow);
-    ui->plot->yAxis->setTickLabelColor (gui_colors[2]);
-    ui->plot->yAxis->setTickLabelFont (font);
+    ui->plot->yAxis->grid()->setPen(QPen(gui_colors[2], 1, Qt::DotLine));
+    ui->plot->yAxis->grid()->setSubGridPen(QPen(gui_colors[1], 1, Qt::DotLine));
+    ui->plot->yAxis->grid()->setSubGridVisible(true);
+    ui->plot->yAxis->setBasePen(QPen(gui_colors[2]));
+    ui->plot->yAxis->setTickPen(QPen(gui_colors[2]));
+    ui->plot->yAxis->setSubTickPen(QPen(gui_colors[2]));
+    ui->plot->yAxis->setUpperEnding(QCPLineEnding::esSpikeArrow);
+    ui->plot->yAxis->setTickLabelColor(gui_colors[2]);
+    ui->plot->yAxis->setTickLabelFont(font);
     /* Range */
-    //ui->plot->yAxis->setRange (ui->spinAxesMin->value(), ui->spinAxesMax->value());
+    // ui->plot->yAxis->setRange (ui->spinAxesMin->value(), ui->spinAxesMax->value());
     /* User can change Y axis tick step with a spin box */
-    //ui->plot->yAxis->setAutoTickStep (false);
-    //ui->plot->yAxis->(ui->spinYStep->value());
+    // ui->plot->yAxis->setAutoTickStep (false);
+    // ui->plot->yAxis->(ui->spinYStep->value());
 
     /* User interactions Drag and Zoom are allowed only on X axis, Y is fixed manually by UI control */
-    ui->plot->setInteraction (QCP::iRangeDrag, true);
-    //ui->plot->setInteraction (QCP::iRangeZoom, true);
-    ui->plot->setInteraction (QCP::iSelectPlottables, true);
-    ui->plot->setInteraction (QCP::iSelectLegend, true);
-    ui->plot->axisRect()->setRangeDrag (Qt::Horizontal);
-    ui->plot->axisRect()->setRangeZoom (Qt::Horizontal);
+    ui->plot->setInteraction(QCP::iRangeDrag, true);
+    // ui->plot->setInteraction (QCP::iRangeZoom, true);
+    ui->plot->setInteraction(QCP::iSelectPlottables, true);
+    ui->plot->setInteraction(QCP::iSelectLegend, true);
+    ui->plot->axisRect()->setRangeDrag(Qt::Horizontal);
+    ui->plot->axisRect()->setRangeZoom(Qt::Horizontal);
 
     /* Legend */
     QFont legendFont;
-    legendFont.setPointSize (9);
-    ui->plot->legend->setVisible (true);
-    ui->plot->legend->setFont (legendFont);
-    ui->plot->legend->setBrush (gui_colors[3]);
-    ui->plot->legend->setBorderPen (gui_colors[2]);
+    legendFont.setPointSize(9);
+    ui->plot->legend->setVisible(true);
+    ui->plot->legend->setFont(legendFont);
+    ui->plot->legend->setBrush(gui_colors[3]);
+    ui->plot->legend->setBorderPen(gui_colors[2]);
     /* By default, the legend is in the inset layout of the main axis rect. So this is how we access it to change legend placement */
-    ui->plot->axisRect()->insetLayout()->setInsetAlignment (0, Qt::AlignTop|Qt::AlignRight);
+    ui->plot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignTop | Qt::AlignRight);
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -369,19 +386,19 @@ void MainWindow::setupPlot()
  * @brief Enable/disable COM controls
  * @param enable true enable, false disable
  */
-void MainWindow::enable_com_controls (bool enable)
+void MainWindow::enable_com_controls(bool enable)
 {
-  /* Com port properties */
-  ui->comboBaud->setEnabled (enable);
-  ui->comboData->setEnabled (enable);
-  ui->comboParity->setEnabled (enable);
-  ui->comboPort->setEnabled (enable);
-  ui->comboStop->setEnabled (enable);
+    /* Com port properties */
+    ui->comboBaud->setEnabled(enable);
+    ui->comboData->setEnabled(enable);
+    ui->comboParity->setEnabled(enable);
+    ui->comboPort->setEnabled(enable);
+    ui->comboStop->setEnabled(enable);
 
-  /* Toolbar elements */
-  ui->actionConnect->setEnabled (enable);
-  ui->actionPause_Plot->setEnabled (!enable);
-  ui->actionDisconnect->setEnabled (!enable);
+    /* Toolbar elements */
+    ui->actionConnect->setEnabled(enable);
+    ui->actionPause_Plot->setEnabled(!enable);
+    ui->actionDisconnect->setEnabled(!enable);
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -405,11 +422,13 @@ bool MainWindow::isBleConnected() const
 
 void MainWindow::bleWrite(const QByteArray &data)
 {
-    if (tcpSocket && tcpSocket->state() == QAbstractSocket::ConnectedState) {
+    if (tcpSocket && tcpSocket->state() == QAbstractSocket::ConnectedState)
+    {
         tcpSocket->write(data);
         return;
     }
-    if (!nusService || !nusRxChar.isValid()) return;
+    if (!nusService || !nusRxChar.isValid())
+        return;
     nusService->writeCharacteristic(nusRxChar, data, QLowEnergyService::WriteWithoutResponse);
 }
 
@@ -417,21 +436,25 @@ void MainWindow::bleWrite(const QByteArray &data)
 
 void MainWindow::connectTCP(const QString &host, quint16 port)
 {
-    connect(this, SIGNAL(portOpenOK()),  this, SLOT(portOpenedSuccess()));
+    connect(this, SIGNAL(portOpenOK()), this, SLOT(portOpenedSuccess()));
     connect(this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
-    connect(this, SIGNAL(portClosed()),  this, SLOT(onPortClosed()));
+    connect(this, SIGNAL(portClosed()), this, SLOT(onPortClosed()));
     connect(this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
     connect(this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
 
-    if (tcpSocket) { tcpSocket->deleteLater(); tcpSocket = nullptr; }
+    if (tcpSocket)
+    {
+        tcpSocket->deleteLater();
+        tcpSocket = nullptr;
+    }
     tcpSocket = new QTcpSocket(this);
-    connect(tcpSocket, &QTcpSocket::connected,    this, &MainWindow::onTcpConnected);
-    connect(tcpSocket, &QTcpSocket::readyRead,    this, &MainWindow::onTcpDataReady);
+    connect(tcpSocket, &QTcpSocket::connected, this, &MainWindow::onTcpConnected);
+    connect(tcpSocket, &QTcpSocket::readyRead, this, &MainWindow::onTcpDataReady);
     connect(tcpSocket, &QTcpSocket::disconnected, this, &MainWindow::onTcpDisconnected);
-    connect(tcpSocket, &QAbstractSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+    connect(tcpSocket, &QAbstractSocket::errorOccurred, this, [this](QAbstractSocket::SocketError)
+            {
         ui->statusBar->showMessage("TCP: " + tcpSocket->errorString());
-        emit portOpenFail();
-    });
+        emit portOpenFail(); });
 
     ui->statusBar->showMessage(QString("TCP: connecting to %1:%2 ...").arg(host).arg(port));
     tcpSocket->connectToHost(host, port);
@@ -450,11 +473,12 @@ void MainWindow::onTcpDataReady()
 
 void MainWindow::onTcpDisconnected()
 {
-    if (connected) {
+    if (connected)
+    {
         emit portClosed();
         ui->statusBar->showMessage("TCP: disconnected!");
         connected = false;
-        plotting  = false;
+        plotting = false;
         ui->actionConnect->setEnabled(true);
         ui->actionPause_Plot->setEnabled(false);
         ui->actionDisconnect->setEnabled(false);
@@ -468,13 +492,14 @@ void MainWindow::onTcpDisconnected()
 
 void MainWindow::connectBLE(const QBluetoothDeviceInfo &device)
 {
-    connect(this, SIGNAL(portOpenOK()),  this, SLOT(portOpenedSuccess()));
+    connect(this, SIGNAL(portOpenOK()), this, SLOT(portOpenedSuccess()));
     connect(this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
-    connect(this, SIGNAL(portClosed()),  this, SLOT(onPortClosed()));
+    connect(this, SIGNAL(portClosed()), this, SLOT(onPortClosed()));
     connect(this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
     connect(this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
 
-    if (bleController) {
+    if (bleController)
+    {
         bleController->disconnectFromDevice();
         delete bleController;
         bleController = nullptr;
@@ -489,24 +514,24 @@ void MainWindow::connectBLE(const QBluetoothDeviceInfo &device)
     connect(bleController, &QLowEnergyController::disconnected,
             this, &MainWindow::onBleControllerDisconnected);
     connect(bleController, &QLowEnergyController::errorOccurred,
-            this, [this](QLowEnergyController::Error err) {
+            this, [this](QLowEnergyController::Error err)
+            {
                 ui->statusBar->showMessage(QString("BLE error code: %1").arg((int)err));
                 qDebug() << "BLE errorOccurred:" << (int)err;
-                emit portOpenFail();
-            });
+                emit portOpenFail(); });
 
     ui->statusBar->showMessage("BLE: connecting...");
     bleController->connectToDevice();
 
     // Timeout: if not connected in 15s — reset and let user retry
-    QTimer::singleShot(15000, this, [this]() {
+    QTimer::singleShot(15000, this, [this]()
+                       {
         if (!isBleConnected() && !connected) {
             ui->statusBar->showMessage("BLE: timeout. Click Connect to retry.");
             if (bleController) bleController->disconnectFromDevice();
             nusRxChar = QLowEnergyCharacteristic();
             enable_com_controls(true);
-        }
-    });
+        } });
 }
 
 void MainWindow::onBleControllerConnected()
@@ -517,9 +542,14 @@ void MainWindow::onBleControllerConnected()
 
 void MainWindow::onBleServiceDiscovered(const QBluetoothUuid &uuid)
 {
-    if (uuid != NUS_SERVICE_UUID) return;
+    if (uuid != NUS_SERVICE_UUID)
+        return;
 
-    if (nusService) { delete nusService; nusService = nullptr; }
+    if (nusService)
+    {
+        delete nusService;
+        nusService = nullptr;
+    }
 
     nusService = bleController->createServiceObject(uuid, this);
     connect(nusService, &QLowEnergyService::stateChanged,
@@ -531,10 +561,11 @@ void MainWindow::onBleServiceDiscovered(const QBluetoothUuid &uuid)
 
 void MainWindow::onBleServiceStateChanged(QLowEnergyService::ServiceState state)
 {
-    if (state != QLowEnergyService::RemoteServiceDiscovered) return;
+    if (state != QLowEnergyService::RemoteServiceDiscovered)
+        return;
 
     auto txChar = nusService->characteristic(NUS_TX_UUID);
-    nusRxChar   = nusService->characteristic(NUS_RX_UUID);
+    nusRxChar = nusService->characteristic(NUS_RX_UUID);
 
     // Subscribe to notifications from ESP32
     auto desc = txChar.descriptor(
@@ -546,7 +577,7 @@ void MainWindow::onBleServiceStateChanged(QLowEnergyService::ServiceState state)
 }
 
 void MainWindow::onBleCharacteristicChanged(const QLowEnergyCharacteristic &c,
-                                             const QByteArray &value)
+                                            const QByteArray &value)
 {
     Q_UNUSED(c)
     processData(value);
@@ -555,11 +586,12 @@ void MainWindow::onBleCharacteristicChanged(const QLowEnergyCharacteristic &c,
 void MainWindow::onBleControllerDisconnected()
 {
     nusRxChar = QLowEnergyCharacteristic();
-    if (connected) {
+    if (connected)
+    {
         emit portClosed();
         ui->statusBar->showMessage("BLE: disconnected!");
         connected = false;
-        plotting  = false;
+        plotting = false;
         ui->actionConnect->setEnabled(true);
         ui->actionPause_Plot->setEnabled(false);
         ui->actionDisconnect->setEnabled(false);
@@ -574,19 +606,19 @@ void MainWindow::onBleControllerDisconnected()
  */
 void MainWindow::onPortClosed()
 {
-    //qDebug() << "Port closed signal received!";
+    // qDebug() << "Port closed signal received!";
     updateTimer.stop();
     connected = false;
     plotting = false;
-    
+
     //--
     closeCsvFile();
-    
-    disconnect (this, SIGNAL(portOpenOK()),  this, SLOT(portOpenedSuccess()));
-    disconnect (this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
-    disconnect (this, SIGNAL(portClosed()),  this, SLOT(onPortClosed()));
-    disconnect (this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
-    disconnect (this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
+
+    disconnect(this, SIGNAL(portOpenOK()), this, SLOT(portOpenedSuccess()));
+    disconnect(this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
+    disconnect(this, SIGNAL(portClosed()), this, SLOT(onPortClosed()));
+    disconnect(this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
+    disconnect(this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -594,7 +626,7 @@ void MainWindow::onPortClosed()
  * @brief Port Combo Box index changed slot; displays info for selected port when combo box is changed
  * @param arg1
  */
-void MainWindow::on_comboPort_currentIndexChanged (const QString &arg1)
+void MainWindow::on_comboPort_currentIndexChanged(const QString &arg1)
 {
     Q_UNUSED(arg1)
 }
@@ -605,12 +637,12 @@ void MainWindow::on_comboPort_currentIndexChanged (const QString &arg1)
  */
 void MainWindow::portOpenedSuccess()
 {
-    //qDebug() << "Port opened signal received!";
-    setupPlot();                                                                          // Create the QCustomPlot area
-    ui->statusBar->showMessage ("Connected!");
-    enable_com_controls (false);                                                                // Disable controls if port is open
-    
-    if(ui->actionRecord_stream->isChecked())
+    // qDebug() << "Port opened signal received!";
+    setupPlot(); // Create the QCustomPlot area
+    ui->statusBar->showMessage("Connected!");
+    enable_com_controls(false); // Disable controls if port is open
+
+    if (ui->actionRecord_stream->isChecked())
     {
         //--> Create new CSV file with current date/timestamp
         openCsvFile();
@@ -618,8 +650,8 @@ void MainWindow::portOpenedSuccess()
     /* Lock the save option while recording */
     ui->actionRecord_stream->setEnabled(false);
 
-    updateTimer.start (20);                                                                // Slot is refreshed 20 times per second
-    connected = true;                                                                      // Set flags
+    updateTimer.start(20); // Slot is refreshed 20 times per second
+    connected = true;      // Set flags
     plotting = true;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -640,8 +672,8 @@ void MainWindow::portOpenedFail()
  */
 void MainWindow::replot()
 {
-  ui->plot->xAxis->setRange (dataPointNumber - ui->spinPoints->value(), dataPointNumber);
-  ui->plot->replot();
+    ui->plot->xAxis->setRange(dataPointNumber - ui->spinPoints->value(), dataPointNumber);
+    ui->plot->replot();
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -727,7 +759,9 @@ void MainWindow::onNewDataArrived(QStringList newData)
     static int data_members = 0;
     volatile bool you_shall_NOT_PASS = false;
 
-    while (you_shall_NOT_PASS) {}
+    while (you_shall_NOT_PASS)
+    {
+    }
     you_shall_NOT_PASS = true;
     int idx;
     if (plotting)
@@ -743,7 +777,7 @@ void MainWindow::onNewDataArrived(QStringList newData)
             ui->plot->graph(idx)->setPen(line_colors[idx % CUSTOM_LINE_COLORS]);
             ui->plot->graph(idx)->setName(QString("Channel %1").arg(idx));
 
-            if(ui->plot->legend->item(idx))
+            if (ui->plot->legend->item(idx))
                 ui->plot->legend->item(idx)->setTextColor(line_colors[idx % CUSTOM_LINE_COLORS]);
 
             ui->listWidget_Channels->addItem(ui->plot->graph(idx)->name());
@@ -754,7 +788,7 @@ void MainWindow::onNewDataArrived(QStringList newData)
         for (int ch = 0; ch < maxChannels && ch < data_members; ch++)
         {
             double raw = newData[ch].toDouble();
-            //raw = convert_to_power(raw, idx);
+            // raw = convert_to_power(raw, idx);
             ui->plot->graph(ch)->addData(dataPointNumber, raw);
         }
 
@@ -772,45 +806,46 @@ double MainWindow::convert_to_power(double raw, int ind)
     switch (ind)
     {
     case 0:
-        s=0.46;
-        r=LEDfeatures.GAIN_SEP;;
+        s = 0.46;
+        r = LEDfeatures.GAIN_SEP;
+        ;
         Idac = Offset.LED2 * 0.47;
         if (Offset.POL2 == 1)
             Idac *= (-1);
         break;
     case 1:
-        s=0.77;
-        r=LEDfeatures.GAIN_SEP;
+        s = 0.77;
+        r = LEDfeatures.GAIN_SEP;
         Idac = Offset.LED3 * 0.47;
         if (Offset.POL3 == 1)
             Idac *= (-1);
         break;
     case 2:
-        s=0.26;
-        r=LEDfeatures.GAIN;
+        s = 0.26;
+        r = LEDfeatures.GAIN;
         Idac = Offset.LED1 * 0.47;
         if (Offset.POL1 == 1)
             Idac *= (-1);
         break;
-    case 3: //ambient
-        s=0.26;
-        r=LEDfeatures.GAIN;
+    case 3: // ambient
+        s = 0.26;
+        r = LEDfeatures.GAIN;
         Idac = Offset.AMB1 * 0.47;
         if (Offset.AMB1 == 1)
             Idac *= (-1);
         break;
     default:
-        s=1000;
+        s = 1000;
         r = LEDfeatures.GAIN;
         Idac = Offset.AMB1 * 0.47;
         if (Offset.AMB1 == 1)
             Idac *= (-1);
         break;
     }
-    double Vadc = raw*1.2/2097000;
-    double Iph = Vadc/r;
+    double Vadc = raw * 1.2 / 2097000;
+    double Iph = Vadc / r;
     Iph += Idac;
-    double P = Iph/s;
+    double P = Iph / s;
     return P;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -821,7 +856,7 @@ double MainWindow::convert_to_power(double raw, int ind)
  */
 void MainWindow::on_spinAxesMin_valueChanged(int arg1)
 {
-    ui->plot->yAxis->setRangeLower (arg1);
+    ui->plot->yAxis->setRangeLower(arg1);
     ui->plot->replot();
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -832,7 +867,7 @@ void MainWindow::on_spinAxesMin_valueChanged(int arg1)
  */
 void MainWindow::on_spinAxesMax_valueChanged(int arg1)
 {
-    ui->plot->yAxis->setRangeUpper (arg1);
+    ui->plot->yAxis->setRangeUpper(arg1);
     ui->plot->replot();
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -885,7 +920,7 @@ void MainWindow::readData()
     }
 }*/
 
-//один канал
+// один канал
 
 /*void MainWindow::readData()
 {
@@ -998,7 +1033,7 @@ void MainWindow::readData()
     }
 }*/
 
-//бинарный поток
+// бинарный поток
 void MainWindow::readData()
 {
     // not used in BLE mode — data arrives via onBleCharacteristicChanged → processData()
@@ -1006,7 +1041,8 @@ void MainWindow::readData()
 
 void MainWindow::processData(const QByteArray &data)
 {
-    if (data.isEmpty()) return;
+    if (data.isEmpty())
+        return;
 
     // для отладки можно показывать HEX-приём (раскомментировать при надобности)
     // ui->textEdit_UartWindow->append(data.toHex(' '));
@@ -1019,20 +1055,23 @@ void MainWindow::processData(const QByteArray &data)
     {
         // ищем старт символа
         int start = rxBuffer.indexOf('$');
-        if (start == -1) {
+        if (start == -1)
+        {
             // не нашли старт — мусор, чистим буфер (или оставляем, если хочешь)
             rxBuffer.clear();
             break;
         }
 
         // если до старта есть мусор — выбрасываем его
-        if (start > 0) {
+        if (start > 0)
+        {
             rxBuffer.remove(0, start);
         }
 
         // ищем конец фрейма ';' после стартового символа
         int end = rxBuffer.indexOf(';', 1); // искать начиная со смещения 1 (после '$')
-        if (end == -1) {
+        if (end == -1)
+        {
             // полного фрейма ещё нет — ждём следующего чтения
             // (что осталось в rxBuffer — начало фрейма)
             break;
@@ -1045,17 +1084,22 @@ void MainWindow::processData(const QByteArray &data)
         rxBuffer.remove(0, end + 1);
 
         // проверка на корректность длины (каждое число = 3 байта)
-        if (payload.size() == 0) {
+        if (payload.size() == 0)
+        {
             qDebug() << "Empty frame received";
             continue;
         }
-        if (payload.size() % 3 != 0) {
-            //qDebug() << "Bad frame length:" << payload.size() << " -> resyncing";
-            // попытка ресинхронизироваться: если в текущем буфере есть следующий '$', сдвинемся к нему
+        if (payload.size() % 3 != 0)
+        {
+            // qDebug() << "Bad frame length:" << payload.size() << " -> resyncing";
+            //  попытка ресинхронизироваться: если в текущем буфере есть следующий '$', сдвинемся к нему
             int nxt = rxBuffer.indexOf('$');
-            if (nxt >= 0) {
+            if (nxt >= 0)
+            {
                 rxBuffer.remove(0, nxt);
-            } else {
+            }
+            else
+            {
                 rxBuffer.clear();
             }
             continue;
@@ -1063,61 +1107,68 @@ void MainWindow::processData(const QByteArray &data)
 
         // распаковываем по 3 байта (MSB first — как у тебя MCU)
         int nvals = payload.size() / 3;
-        if (nvals != 4) {
+        if (nvals != 4)
+        {
             return;
         }
         QStringList incomingData;
-        for (int k = 0; k < nvals; ++k) {
+        for (int k = 0; k < nvals; ++k)
+        {
             int off = k * 3;
             // MCU отправляет: (sample>>16)&0xFF, (sample>>8)&0xFF, sample&0xFF  => MSB, mid, LSB
             uint8_t b0 = static_cast<uint8_t>(payload[off]);     // MSB
-            uint8_t b1 = static_cast<uint8_t>(payload[off+1]);   // mid
-            uint8_t b2 = static_cast<uint8_t>(payload[off+2]);   // LSB
+            uint8_t b1 = static_cast<uint8_t>(payload[off + 1]); // mid
+            uint8_t b2 = static_cast<uint8_t>(payload[off + 2]); // LSB
 
-            int val = ( (b0 << 16) | (b1 << 8) | b2 );
+            int val = ((b0 << 16) | (b1 << 8) | b2);
             // sign extension for 24-bit signed
-            if (val & 0x800000) val |= 0xFF000000;
+            if (val & 0x800000)
+                val |= 0xFF000000;
 
             incomingData << QString::number(val);
         }
 
-        qDebug()<<"nvals = "<<nvals;
+        qDebug() << "nvals = " << nvals;
 
         // выводим в окно (если нужно) и эмитим сигнал
         int sz = 7;
         idx_ = (idx_ + 1) % sz;
-        for (int ii = 0; ii < 3; ++ii) {
+        for (int ii = 0; ii < 3; ++ii)
+        {
             data_vector[ii][idx_] = incomingData[ii].toDouble();
         }
 
-        if (0 <= green_idx_ && green_idx_ < 500) {
+        if (0 <= green_idx_ && green_idx_ < 500)
+        {
             green_samples[green_idx_] = incomingData[2].toDouble();
             green_idx_++;
         }
 
-        if (green_idx_ == 500) {
+        if (green_idx_ == 500)
+        {
             auto heart_rate = calculateHeartRate(green_samples, 500, 100);
             qDebug() << "Пульс " << heart_rate;
             green_idx_ = 0;
         }
 
-
-
-        if (idx_ == 0) {
+        if (idx_ == 0)
+        {
             std::vector<double> data_sum(3, 0);
-            for (int ii = 0; ii < 3; ++ii) {
-                for (int jj = 0; jj < sz; ++jj) {
+            for (int ii = 0; ii < 3; ++ii)
+            {
+                for (int jj = 0; jj < sz; ++jj)
+                {
                     data_sum[ii] += data_vector[ii][jj];
                 }
             }
-            calculate(data_sum[2] / sz, data_sum[0] / sz, data_sum[1] / sz);
+            calculate(data_sum[0] / sz, data_sum[1] / sz, data_sum[2] / sz);
         }
-        if (filterDisplayedData && idx_ == 0) ui->textEdit_UartWindow->append(incomingData.join(" "));
+        if (filterDisplayedData && idx_ == 0)
+            ui->textEdit_UartWindow->append(incomingData.join(" "));
         emit newData(incomingData);
         last_data_time = QDateTime::currentMSecsSinceEpoch();
     } // while(true)
 }
-
 
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1125,16 +1176,16 @@ void MainWindow::processData(const QByteArray &data)
  * @brief Number of axes combo; when changed, display axes colors in status bar
  * @param index
  */
-//void MainWindow::on_comboAxes_currentIndexChanged(int index)
+// void MainWindow::on_comboAxes_currentIndexChanged(int index)
 //{
-//    if(index == 0) {
-//      ui->statusBar->showMessage("Axis 1: Red");
-//    } else if(index == 1) {
-//        ui->statusBar->showMessage("Axis 1: Red; Axis 2: Yellow");
-//    } else {
-//        ui->statusBar->showMessage("Axis 1: Red; Axis 2: Yellow; Axis 3: Green");
-//    }
-//}
+//     if(index == 0) {
+//       ui->statusBar->showMessage("Axis 1: Red");
+//     } else if(index == 1) {
+//         ui->statusBar->showMessage("Axis 1: Red; Axis 2: Yellow");
+//     } else {
+//         ui->statusBar->showMessage("Axis 1: Red; Axis 2: Yellow; Axis 3: Green");
+//     }
+// }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 /**
@@ -1154,7 +1205,7 @@ void MainWindow::on_spinYStep_valueChanged(int arg1)
  */
 void MainWindow::on_savePNGButton_clicked()
 {
-    ui->plot->savePng (QString::number(dataPointNumber) + ".png", 1920, 1080, 2, 50);
+    ui->plot->savePng(QString::number(dataPointNumber) + ".png", 1920, 1080, 2, 50);
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1176,12 +1227,12 @@ void MainWindow::onMouseMoveInPlot(QMouseEvent *event)
  * @brief Send plot wheelmouse to spinbox
  * @param event
  */
-void MainWindow::on_mouse_wheel_in_plot (QWheelEvent *event)
+void MainWindow::on_mouse_wheel_in_plot(QWheelEvent *event)
 {
     QWheelEvent inverted_event = QWheelEvent(event->position(), event->globalPosition(),
                                              event->pixelDelta(), event->angleDelta(), event->buttons(),
                                              event->modifiers(), event->phase(), event->inverted());
-  QApplication::sendEvent (ui->spinPoints, &inverted_event);
+    QApplication::sendEvent(ui->spinPoints, &inverted_event);
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1190,24 +1241,24 @@ void MainWindow::on_mouse_wheel_in_plot (QWheelEvent *event)
  * @param plottable
  * @param event
  */
-void MainWindow::channel_selection (void)
+void MainWindow::channel_selection(void)
 {
     /* synchronize selection of graphs with selection of corresponding legend items */
-     for (int i = 0; i < ui->plot->graphCount(); i++)
-       {
-         QCPGraph *graph = ui->plot->graph(i);
-         QCPPlottableLegendItem *item = ui->plot->legend->itemWithPlottable (graph);
-         if (item->selected())
-           {
-             item->setSelected (true);
-   //          graph->set (true);
-           }
-         else
-           {
-             item->setSelected (false);
-     //        graph->setSelected (false);
-           }
-       }
+    for (int i = 0; i < ui->plot->graphCount(); i++)
+    {
+        QCPGraph *graph = ui->plot->graph(i);
+        QCPPlottableLegendItem *item = ui->plot->legend->itemWithPlottable(graph);
+        if (item->selected())
+        {
+            item->setSelected(true);
+            //          graph->set (true);
+        }
+        else
+        {
+            item->setSelected(false);
+            //        graph->setSelected (false);
+        }
+    }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1218,24 +1269,24 @@ void MainWindow::channel_selection (void)
  */
 void MainWindow::legend_double_click(QCPLegend *legend, QCPAbstractLegendItem *item, QMouseEvent *event)
 {
-    Q_UNUSED (legend)
+    Q_UNUSED(legend)
     Q_UNUSED(event)
     /* Only react if item was clicked (user could have clicked on border padding of legend where there is no item, then item is 0) */
     if (item)
-      {
-        QCPPlottableLegendItem *plItem = qobject_cast<QCPPlottableLegendItem*>(item);
+    {
+        QCPPlottableLegendItem *plItem = qobject_cast<QCPPlottableLegendItem *>(item);
         bool ok;
-        QString newName = QInputDialog::getText (this, "Change channel name", "New name:", QLineEdit::Normal, plItem->plottable()->name(), &ok, Qt::Popup);
+        QString newName = QInputDialog::getText(this, "Change channel name", "New name:", QLineEdit::Normal, plItem->plottable()->name(), &ok, Qt::Popup);
         if (ok)
-          {
+        {
             plItem->plottable()->setName(newName);
-            for(int i=0; i<ui->plot->graphCount(); i++)
+            for (int i = 0; i < ui->plot->graphCount(); i++)
             {
                 ui->listWidget_Channels->item(i)->setText(ui->plot->graph(i)->name());
             }
             ui->plot->replot();
-          }
-      }
+        }
+    }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1243,10 +1294,10 @@ void MainWindow::legend_double_click(QCPLegend *legend, QCPAbstractLegendItem *i
  * @brief Spin box controls how many data points are collected and displayed
  * @param arg1
  */
-void MainWindow::on_spinPoints_valueChanged (int arg1)
+void MainWindow::on_spinPoints_valueChanged(int arg1)
 {
     Q_UNUSED(arg1)
-    ui->plot->xAxis->setRange (dataPointNumber - ui->spinPoints->value(), dataPointNumber);
+    ui->plot->xAxis->setRange(dataPointNumber - ui->spinPoints->value(), dataPointNumber);
     ui->plot->replot();
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1256,9 +1307,9 @@ void MainWindow::on_spinPoints_valueChanged (int arg1)
  */
 void MainWindow::on_actionHow_to_use_triggered()
 {
-  helpWindow = new HelpWindow (this);
-  helpWindow->setWindowTitle ("How to use this application");
-  helpWindow->show();
+    helpWindow = new HelpWindow(this);
+    helpWindow->setWindowTitle("How to use this application");
+    helpWindow->show();
 }
 
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1273,17 +1324,24 @@ void MainWindow::on_actionConnect_triggered()
     {
         /* Is connected, restart if paused */
         if (!plotting)
-        {                                                                              // Start plotting
-            updateTimer.start();                                                              // Start updating plot timer
+        {                        // Start plotting
+            updateTimer.start(); // Start updating plot timer
             plotting = true;
-            ui->actionConnect->setEnabled (false);
-            ui->actionPause_Plot->setEnabled (true);
-            ui->statusBar->showMessage ("Plot restarted!");
+            ui->actionConnect->setEnabled(false);
+            ui->actionPause_Plot->setEnabled(true);
+            ui->statusBar->showMessage("Plot restarted!");
         }
     }
     else
     {
-        connectTCP("127.0.0.1", 12345);
+        if (ui->comboPort->currentText() == "localhost")
+        {
+            connectTCP("127.0.0.1", 12345);
+        }
+        else
+        {
+            ui->statusBar->showMessage("COM port connection not supported. Select 'localhost'.");
+        }
     }
 }
 
@@ -1294,13 +1352,13 @@ void MainWindow::on_actionConnect_triggered()
  */
 void MainWindow::on_actionPause_Plot_triggered()
 {
-  if (plotting)
+    if (plotting)
     {
-      updateTimer.stop();                                                               // Stop updating plot timer
-      plotting = false;
-      ui->actionConnect->setEnabled (true);
-      ui->actionPause_Plot->setEnabled (false);
-      ui->statusBar->showMessage ("Plot paused, new data will be ignored");
+        updateTimer.stop(); // Stop updating plot timer
+        plotting = false;
+        ui->actionConnect->setEnabled(true);
+        ui->actionPause_Plot->setEnabled(false);
+        ui->statusBar->showMessage("Plot paused, new data will be ignored");
     }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1312,11 +1370,11 @@ void MainWindow::on_actionRecord_stream_triggered()
 {
     if (ui->actionRecord_stream->isChecked())
     {
-      ui->statusBar->showMessage ("Data will be stored in csv file");
+        ui->statusBar->showMessage("Data will be stored in csv file");
     }
     else
     {
-      ui->statusBar->showMessage ("Data will not be stored anymore");
+        ui->statusBar->showMessage("Data will not be stored anymore");
     }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1326,29 +1384,30 @@ void MainWindow::on_actionRecord_stream_triggered()
  */
 void MainWindow::on_actionDisconnect_triggered()
 {
-  if (connected)
+    if (connected)
     {
-      nusRxChar = QLowEnergyCharacteristic(); // invalidate before disconnect to suppress onBleControllerDisconnected UI update
-      if (bleController)
-          bleController->disconnectFromDevice();
-      if (tcpSocket) {
-          tcpSocket->disconnectFromHost();
-          tcpSocket->deleteLater();
-          tcpSocket = nullptr;
-      }
+        connected = false; // set first so onTcpDisconnected/onBleControllerDisconnected skip their UI updates
 
-      emit portClosed();
+        nusRxChar = QLowEnergyCharacteristic();
+        if (bleController)
+            bleController->disconnectFromDevice();
+        if (tcpSocket)
+        {
+            tcpSocket->disconnectFromHost();
+            // onTcpDisconnected handles deleteLater/nullptr — don't touch tcpSocket after this
+        }
 
-      ui->statusBar->showMessage("Disconnected!");
-      connected = false;
-      ui->actionConnect->setEnabled(true);
-      plotting  = false;
-      ui->actionPause_Plot->setEnabled(false);
-      ui->actionDisconnect->setEnabled(false);
-      ui->actionRecord_stream->setEnabled(true);
-      receivedData.clear();
-      ui->savePNGButton->setEnabled(false);
-      enable_com_controls(true);
+        emit portClosed();
+
+        ui->statusBar->showMessage("Disconnected!");
+        ui->actionConnect->setEnabled(true);
+        plotting = false;
+        ui->actionPause_Plot->setEnabled(false);
+        ui->actionDisconnect->setEnabled(false);
+        ui->actionRecord_stream->setEnabled(true);
+        receivedData.clear();
+        ui->savePNGButton->setEnabled(false);
+        enable_com_controls(true);
     }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1375,12 +1434,11 @@ void MainWindow::on_actionClear_triggered()
  */
 void MainWindow::openCsvFile(void)
 {
-  m_csvFile = new QFile(QDateTime::currentDateTime().toString("yyyy-MM-d-HH-mm-ss-")+"data-out.csv");
-  if(!m_csvFile)
-      return;
-  if (!m_csvFile->open(QIODevice::ReadWrite | QIODevice::Text))
+    m_csvFile = new QFile(QDateTime::currentDateTime().toString("yyyy-MM-d-HH-mm-ss-") + "data-out.csv");
+    if (!m_csvFile)
         return;
-  
+    if (!m_csvFile->open(QIODevice::ReadWrite | QIODevice::Text))
+        return;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1390,10 +1448,12 @@ void MainWindow::openCsvFile(void)
  */
 void MainWindow::closeCsvFile(void)
 {
-  if(!m_csvFile) return;
-  m_csvFile->close();
-  if(m_csvFile) delete m_csvFile;
-  m_csvFile = nullptr;
+    if (!m_csvFile)
+        return;
+    m_csvFile->close();
+    if (m_csvFile)
+        delete m_csvFile;
+    m_csvFile = nullptr;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1403,23 +1463,24 @@ void MainWindow::closeCsvFile(void)
  */
 void MainWindow::saveStream(QStringList newData)
 {
-  if(!m_csvFile)
-    return;
-  if(ui->actionRecord_stream->isChecked())
-  {
-      QTextStream out(m_csvFile);
-      foreach (const QString &str, newData) {
-        out << str << ",";
-      }
-      out << "\n";
-  }
+    if (!m_csvFile)
+        return;
+    if (ui->actionRecord_stream->isChecked())
+    {
+        QTextStream out(m_csvFile);
+        foreach (const QString &str, newData)
+        {
+            out << str << ",";
+        }
+        out << "\n";
+    }
 }
 
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 void MainWindow::on_pushButton_TextEditHide_clicked()
 {
-    if(ui->pushButton_TextEditHide->isChecked())
+    if (ui->pushButton_TextEditHide->isChecked())
     {
         ui->textEdit_UartWindow->setVisible(false);
         ui->pushButton_TextEditHide->setText("Show TextBox");
@@ -1433,7 +1494,7 @@ void MainWindow::on_pushButton_TextEditHide_clicked()
 
 void MainWindow::on_pushButton_ShowallData_clicked()
 {
-    if(ui->pushButton_ShowallData->isChecked())
+    if (ui->pushButton_ShowallData->isChecked())
     {
         filterDisplayedData = false;
         ui->pushButton_ShowallData->setText("Filter Incoming Data");
@@ -1446,10 +1507,10 @@ void MainWindow::on_pushButton_ShowallData_clicked()
 }
 
 void MainWindow::on_pushButton_AutoScale_clicked()
-{   
+{
     ui->plot->yAxis->rescale(true);
-    ui->spinAxesMax->setValue(int(ui->plot->yAxis->range().upper) + int(ui->plot->yAxis->range().upper*0.1));
-    ui->spinAxesMin->setValue(int(ui->plot->yAxis->range().lower) + int(ui->plot->yAxis->range().lower*0.1));
+    ui->spinAxesMax->setValue(int(ui->plot->yAxis->range().upper) + int(ui->plot->yAxis->range().upper * 0.1));
+    ui->spinAxesMin->setValue(int(ui->plot->yAxis->range().lower) + int(ui->plot->yAxis->range().lower * 0.1));
 
     need_calculate_number = 3;
     green_idx_ = -1;
@@ -1477,68 +1538,103 @@ void MainWindow::on_pushButton_AutoScale_clicked()
     // ui->verticalSlider_3->setValue(-Offset.LED3);
 }
 
-void MainWindow::calculate(double value1, double value2, double value3) {
+void MainWindow::calculate(double value1, double value2, double value3)
+{
     ui->textEdit_UartWindow->append("calculate");
-    qDebug() << "calculate: " << value1 << " " << value2 << " " << value3 << "\n";
-    if (need_calculate_number == 3) {
-        if (value3 > 1e6) {
+    qDebug() << "calculate! : " << value1 << " " << value2 << " " << value3 << "\n";
+    if (need_calculate_number == 3)
+    {
+        qDebug() << "need3\n";
+        if (value3 > 1e6)
+        {
+            qDebug() << "need3 > 1e6\n";
             green_idx_ = -1;
             Offset.POL3 = 1;
-            if (Offset.LED3 == 15) {
+            if (Offset.LED3 == 15)
+            {
                 LED[2].bright--;
                 Offset.LED3 = 1;
-            } else  {
+            }
+            else
+            {
                 Offset.LED3++;
             }
-        } else if (value3 < 0) {
+        }
+        else if (value3 < 0)
+        {
+            qDebug() << "need3 < 0\n";
             green_idx_ = -1;
             LED[2].bright = 9;
             Offset.LED3 = 1;
             Offset.POL3 = 1;
-        } else {
+        }
+        else
+        {
+            qDebug() << "need3 next\n";
             need_calculate_number--;
         }
-    } else if (need_calculate_number == 2) {
-        if (value2 > 1e6) {
+    }
+    else if (need_calculate_number == 2)
+    {
+        if (value2 > 1e6)
+        {
             green_idx_ = -1;
             Offset.POL2 = 1;
-            if (Offset.LED2 == 15) {
+            if (Offset.LED2 == 15)
+            {
                 LED[1].bright--;
                 Offset.LED2 = 1;
-            } else  {
+            }
+            else
+            {
                 Offset.LED2++;
             }
-        } else if (value2 < 0) {
+        }
+        else if (value2 < 0)
+        {
             green_idx_ = -1;
             LED[1].bright = 9;
             Offset.LED2 = 1;
             Offset.POL2 = 1;
-        } else {
+        }
+        else
+        {
             need_calculate_number--;
         }
-    } else if (need_calculate_number == 1) {
-        if (value1 > 1e6) {
+    }
+    else if (need_calculate_number == 1)
+    {
+        if (value1 > 1e6)
+        {
             green_idx_ = -1;
             Offset.POL1 = 1;
-            if (Offset.LED1 == 15) {
+            if (Offset.LED1 == 15)
+            {
                 LED[0].bright--;
                 Offset.LED1 = 1;
-            } else  {
+            }
+            else
+            {
                 Offset.LED1++;
             }
-        } else if (value1 < 0) {
+        }
+        else if (value1 < 0)
+        {
             green_idx_ = -1;
             LED[0].bright = 63;
             Offset.LED1 = 1;
             Offset.POL1 = 1;
-        } else {
+        }
+        else
+        {
             need_calculate_number--;
             ui->plot->yAxis->rescale(true);
             auto mx = std::max(std::max(value1, value2), value3);
             auto mn = std::min(std::min(value1, value2), value3);
-            ui->spinAxesMax->setValue(int(mx)*1.3);
-            ui->spinAxesMin->setValue(int(mn)*0.7);
-            if (green_idx_ == -1) {
+            ui->spinAxesMax->setValue(int(mx) * 1.3);
+            ui->spinAxesMin->setValue(int(mn) * 0.7);
+            if (green_idx_ == -1)
+            {
                 green_idx_ = 0;
             }
             return;
@@ -1556,7 +1652,7 @@ void MainWindow::calculate(double value1, double value2, double value3) {
 
 void MainWindow::on_pushButton_ResetVisible_clicked()
 {
-    for(int i=0; i<ui->plot->graphCount(); i++)
+    for (int i = 0; i < ui->plot->graphCount(); i++)
     {
         ui->plot->graph(i)->setVisible(true);
         ui->listWidget_Channels->item(i)->setBackground(Qt::NoBrush);
@@ -1567,7 +1663,7 @@ void MainWindow::on_listWidget_Channels_itemDoubleClicked(QListWidgetItem *item)
 {
     int graphIdx = ui->listWidget_Channels->currentRow();
 
-    if(ui->plot->graph(graphIdx)->visible())
+    if (ui->plot->graph(graphIdx)->visible())
     {
         ui->plot->graph(graphIdx)->setVisible(false);
         item->setBackground(Qt::black);
@@ -1583,31 +1679,28 @@ void MainWindow::on_listWidget_Channels_itemDoubleClicked(QListWidgetItem *item)
 void MainWindow::on_pushButton_clicked()
 {
     ui->comboPort->clear();
-    /* List all available serial ports and populate ports combo box */
+    ui->comboPort->addItem("localhost");
     for (QSerialPortInfo port : QSerialPortInfo::availablePorts())
-    {
-        ui->comboPort->addItem (port.portName());
-    }
+        ui->comboPort->addItem(port.portName());
 }
 
 void MainWindow::on_actionSettings_triggered()
 {
-    settingsWindow = new AdvancedSettings (this);
+    settingsWindow = new AdvancedSettings(this);
     connect(settingsWindow, &AdvancedSettings::settingsUpdated,
             this, &MainWindow::updateFromSettings);
-    settingsWindow->setWindowTitle ("AFE4404 configuration");
+    settingsWindow->setWindowTitle("AFE4404 configuration");
     settingsWindow->show();
-
 }
 
 void MainWindow::onSendDataRequested()
 {
 }
 
-QByteArray MainWindow::makeArray(quint32 raw) //LSB first
+QByteArray MainWindow::makeArray(quint32 raw) // LSB first
 {
     QByteArray packet;
-    for (int i=0; i<3; i++)
+    for (int i = 0; i < 3; i++)
     {
         packet.append(static_cast<char>(raw & 0xFF));
         raw = raw >> 8;
@@ -1615,17 +1708,18 @@ QByteArray MainWindow::makeArray(quint32 raw) //LSB first
     return packet;
 }
 
-
 void MainWindow::on_actionSend_triggered()
 {
-    if (!isBleConnected()) {
+    if (!isBleConnected())
+    {
         ui->statusBar->showMessage("BLE: not connected — cannot send configuration.");
         return;
     }
 
     ui->statusBar->showMessage("BLE: sending configuration...");
 
-    auto sendCmd = [&](uint8_t addr, uint32_t val) {
+    auto sendCmd = [&](uint8_t addr, uint32_t val)
+    {
         QByteArray frame;
         frame.append(static_cast<char>(addr));
         frame.append(makeArray(val));
@@ -1634,113 +1728,113 @@ void MainWindow::on_actionSend_triggered()
         QThread::msleep(10);
     };
 
-    sendCmd(0x00,0x08); //0
-    sendCmd(0x23,1<<9); //1
-    sendCmd(0x1E,(quint32)ADC.NUMAV | (quint32)1<<8); //2
-        qDebug() << "ADC.NUMAV:" << ADC.NUMAV;
-    quint32 tempDIV=LEDfeatures.DIV_PRF;
-        if (tempDIV > 0)
+    sendCmd(0x00, 0x08);                                 // 0
+    sendCmd(0x23, 1 << 9);                               // 1
+    sendCmd(0x1E, (quint32)ADC.NUMAV | (quint32)1 << 8); // 2
+    qDebug() << "ADC.NUMAV:" << ADC.NUMAV;
+    quint32 tempDIV = LEDfeatures.DIV_PRF;
+    if (tempDIV > 0)
         tempDIV += 3;
-    sendCmd(0x39,tempDIV); //3
-        qDebug() << "LEDfeatures.DIV_PRF:" << LEDfeatures.DIV_PRF;
-        qDebug() << "tempDIV:" << tempDIV;
-    sendCmd(0x1D,LEDfeatures.PRF); //4
-    sendCmd(0x09,LED[1].LEDSTC); //5
+    sendCmd(0x39, tempDIV); // 3
+    qDebug() << "LEDfeatures.DIV_PRF:" << LEDfeatures.DIV_PRF;
+    qDebug() << "tempDIV:" << tempDIV;
+    sendCmd(0x1D, LEDfeatures.PRF); // 4
+    sendCmd(0x09, LED[1].LEDSTC);   // 5
     qDebug() << "LED[1].LEDSTC" << LED[1].LEDSTC;
-    sendCmd(0x0A,LED[1].LEDENDC); //6
+    sendCmd(0x0A, LED[1].LEDENDC); // 6
     qDebug() << "LED[1].LEDENDC" << LED[1].LEDENDC;
-    sendCmd(0x01,LED[1].STC); //7
+    sendCmd(0x01, LED[1].STC); // 7
     qDebug() << "LED[1].STC:" << LED[1].STC;
-    sendCmd(0x02,LED[1].ENDC); //8
+    sendCmd(0x02, LED[1].ENDC); // 8
     qDebug() << "LED[1].ENDC:" << LED[1].ENDC;
-    sendCmd(0x15,ADC.STC0); //9
-    sendCmd(0x16,ADC.END0); //10
-    sendCmd(0x0D,LED[1].CONVST); //11
+    sendCmd(0x15, ADC.STC0);      // 9
+    sendCmd(0x16, ADC.END0);      // 10
+    sendCmd(0x0D, LED[1].CONVST); // 11
     qDebug() << "LED[1].CONVST" << LED[1].CONVST;
-    sendCmd(0x0E,LED[1].CONVEND); //12
+    sendCmd(0x0E, LED[1].CONVEND); // 12
     qDebug() << "LED[1].CONVEND" << LED[1].CONVEND;
     if (LED[2].enabled)
     {
-        sendCmd(0x36,LED[2].LEDSTC); //13
+        sendCmd(0x36, LED[2].LEDSTC); // 13
         qDebug() << "LED[2].LEDSTC" << LED[2].LEDSTC;
-        sendCmd(0x37,LED[2].LEDENDC); //14
+        sendCmd(0x37, LED[2].LEDENDC); // 14
     }
     else
     {
-        sendCmd(0x36,0); //13
-        sendCmd(0x37,0); //14
+        sendCmd(0x36, 0); // 13
+        sendCmd(0x37, 0); // 14
     }
-    if (!LED[2].enabled) //send amb2 or led3
+    if (!LED[2].enabled) // send amb2 or led3
     {
-        sendCmd(0x05, AMB[1].STC); //15
+        sendCmd(0x05, AMB[1].STC); // 15
         qDebug() << "AMB[1].STC" << AMB[1].STC;
-        sendCmd(0x06, AMB[1].ENDC); //16
+        sendCmd(0x06, AMB[1].ENDC); // 16
         qDebug() << "AMB[1].STC" << AMB[1].ENDC;
     }
     else
     {
-        sendCmd(0x05, LED[2].STC); //15
+        sendCmd(0x05, LED[2].STC); // 15
         qDebug() << "LED[2].STC" << LED[2].STC;
-        sendCmd(0x06, LED[2].ENDC); //16
+        sendCmd(0x06, LED[2].ENDC); // 16
         qDebug() << "LED[2].ENDC" << LED[2].ENDC;
     }
-    sendCmd(0x17,ADC.STC1); //17
-    sendCmd(0x18,ADC.END1); //18
-    if (!LED[2].enabled) //send amb2 or led3
+    sendCmd(0x17, ADC.STC1); // 17
+    sendCmd(0x18, ADC.END1); // 18
+    if (!LED[2].enabled)     // send amb2 or led3
     {
-        sendCmd(0x0F,AMB[1].CONVST); //19
-        sendCmd(0x10,AMB[1].CONVEND); //20
+        sendCmd(0x0F, AMB[1].CONVST);  // 19
+        sendCmd(0x10, AMB[1].CONVEND); // 20
     }
     else
     {
-        sendCmd(0x0F,LED[2].CONVST); //19
-        sendCmd(0x10,LED[2].CONVEND); //20
+        sendCmd(0x0F, LED[2].CONVST);  // 19
+        sendCmd(0x10, LED[2].CONVEND); // 20
     }
-    sendCmd(0x03,LED[0].LEDSTC); //21
+    sendCmd(0x03, LED[0].LEDSTC); // 21
     qDebug() << "LED[0].LEDSTC:" << LED[0].LEDSTC;
-    sendCmd(0x04,LED[0].LEDENDC); //22
+    sendCmd(0x04, LED[0].LEDENDC); // 22
     qDebug() << "LED[0].LEDENDC:" << LED[0].LEDENDC;
-    sendCmd(0x07,LED[0].STC); //23
+    sendCmd(0x07, LED[0].STC); // 23
     qDebug() << "LED[0].STC" << LED[0].STC;
-    sendCmd(0x08,LED[0].ENDC); //24
+    sendCmd(0x08, LED[0].ENDC); // 24
     qDebug() << "LED[0].ENDC" << LED[0].ENDC;
-    sendCmd(0x19,ADC.STC2); //25
-    sendCmd(0x1A,ADC.END2); //26
-    sendCmd(0x11,LED[0].CONVST); //27
-    sendCmd(0x12,LED[0].CONVEND); //28
-    sendCmd(0x0B,AMB[0].STC); //29
+    sendCmd(0x19, ADC.STC2);       // 25
+    sendCmd(0x1A, ADC.END2);       // 26
+    sendCmd(0x11, LED[0].CONVST);  // 27
+    sendCmd(0x12, LED[0].CONVEND); // 28
+    sendCmd(0x0B, AMB[0].STC);     // 29
     qDebug() << "AMB[0].STC" << AMB[0].STC;
-    sendCmd(0x0C,AMB[0].ENDC); //30
+    sendCmd(0x0C, AMB[0].ENDC); // 30
     qDebug() << "AMB[0].ENDC" << AMB[0].ENDC;
-    sendCmd(0x1B,ADC.STC3); //31
-    sendCmd(0x1C,ADC.END3); //32
-    sendCmd(0x13,AMB[0].CONVST); //33
-    sendCmd(0x14,AMB[0].CONVEND); //34
-    sendCmd(0x32,LEDfeatures.PDNSTC); //35
-    sendCmd(0x33,LEDfeatures.PDNENDC); //36
+    sendCmd(0x1B, ADC.STC3);            // 31
+    sendCmd(0x1C, ADC.END3);            // 32
+    sendCmd(0x13, AMB[0].CONVST);       // 33
+    sendCmd(0x14, AMB[0].CONVEND);      // 34
+    sendCmd(0x32, LEDfeatures.PDNSTC);  // 35
+    sendCmd(0x33, LEDfeatures.PDNENDC); // 36
     qDebug() << "LEDfeatures.PDNENDC" << LEDfeatures.PDNENDC;
-    quint32 temP=0;
+    quint32 temP = 0;
     if (LED[0].enabled)
         temP |= (quint32)LED[0].bright;
     if (LED[1].enabled)
-        temP |= (quint32)LED[1].bright<<6;
+        temP |= (quint32)LED[1].bright << 6;
     if (LED[2].enabled)
-        temP |= (quint32)LED[2].bright<<12;
-    sendCmd(0x22,temP); //37
+        temP |= (quint32)LED[2].bright << 12;
+    sendCmd(0x22, temP); // 37
     qDebug() << "LED[0].bright" << LED[0].bright;
     qDebug() << "LED[1].bright" << LED[1].bright;
     qDebug() << "LED[2].bright" << LED[2].bright;
-    sendCmd(0x21,(quint32)LEDfeatures.CF <<3 | (quint32)LEDfeatures.GAIN); //38
+    sendCmd(0x21, (quint32)LEDfeatures.CF << 3 | (quint32)LEDfeatures.GAIN); // 38
     if (LEDfeatures.SepGain)
-        sendCmd(0x20, (quint32)1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP); //39
+        sendCmd(0x20, (quint32)1 << 15 | (quint32)LEDfeatures.CF_SEP << 3 | (quint32)LEDfeatures.GAIN_SEP); // 39
     else
-        sendCmd(0x20, 0);//LEDfeatures.CF_SEP <<3 | LEDfeatures.GAIN_SEP); //39
+        sendCmd(0x20, 0); // LEDfeatures.CF_SEP <<3 | LEDfeatures.GAIN_SEP); //39
 
     if (ADC.decEn)
-        sendCmd(0x3D, (quint32)1 << 5 | (quint32)ADC.decFactor << 1); //40
+        sendCmd(0x3D, (quint32)1 << 5 | (quint32)ADC.decFactor << 1); // 40
     else
-        sendCmd(0x3D, 0); //40
-    sendCmd(0x3A, full_offset()); //41
+        sendCmd(0x3D, 0);         // 40
+    sendCmd(0x3A, full_offset()); // 41
     ui->statusBar->showMessage("BLE: configuration sent!");
 }
 void MainWindow::updateFromSettings()
@@ -1753,7 +1847,6 @@ void MainWindow::updateFromSettings()
     ui->main_scrollLED1->setValue(LED[0].bright);
     ui->main_scrollLED2->setValue(LED[1].bright);
     ui->main_scrollLED3->setValue(LED[2].bright);
-
 
     ui->main_labelLED1->setText(convertBrightness(LED[0].bright));
     ui->main_labelLED2->setText(convertBrightness(LED[1].bright));
@@ -1774,13 +1867,13 @@ void MainWindow::updateFromSettings()
 
 QString MainWindow::convertBrightness(int val)
 {
-    int f = val*8/10;
-    int g = (val*8)%10;
+    int f = val * 8 / 10;
+    int g = (val * 8) % 10;
     QString txt;
     if (val != 63)
-        txt=QString::number(f)+"."+QString::number(g);
+        txt = QString::number(f) + "." + QString::number(g);
     else
-        txt=QString::number(f);
+        txt = QString::number(f);
     txt += " mA";
     return txt;
 }
@@ -1789,13 +1882,13 @@ void MainWindow::on_main_scrollLED1_valueChanged(int value)
 {
     LED[0].bright = value;
     qDebug() << "LED[0].bright: " << LED[0].bright;
-    quint32 temP=0;
+    quint32 temP = 0;
     if (LED[0].enabled)
         temP |= (quint32)LED[0].bright;
     if (LED[1].enabled)
-        temP |= (quint32)LED[1].bright<<6;
+        temP |= (quint32)LED[1].bright << 6;
     if (LED[2].enabled)
-        temP |= (quint32)LED[2].bright<<12;
+        temP |= (quint32)LED[2].bright << 12;
     if (isBleConnected())
     {
         send_from_main(0x22, temP);
@@ -1818,18 +1911,17 @@ void MainWindow::send_from_main(uint8_t addr, uint32_t val)
     bleWrite(frame);
 }
 
-
 void MainWindow::on_main_scrollLED2_valueChanged(int value)
 {
     LED[1].bright = value;
     qDebug() << "LED[1].bright: " << LED[1].bright;
-    quint32 temP=0;
+    quint32 temP = 0;
     if (LED[0].enabled)
         temP |= (quint32)LED[0].bright;
     if (LED[1].enabled)
-        temP |= (quint32)LED[1].bright<<6;
+        temP |= (quint32)LED[1].bright << 6;
     if (LED[2].enabled)
-        temP |= (quint32)LED[2].bright<<12;
+        temP |= (quint32)LED[2].bright << 12;
     if (isBleConnected())
     {
         send_from_main(0x22, temP);
@@ -1842,20 +1934,19 @@ void MainWindow::on_main_scrollLED2_valueChanged(int value)
     ui->main_labelLED2->setText(convertBrightness(LED[1].bright));
 }
 
-
 void MainWindow::on_main_scrollLED3_valueChanged(int value)
 {
     LED[2].bright = value;
     qDebug() << "LED[2].bright: " << LED[2].bright;
-    quint32 temP=0;
+    quint32 temP = 0;
     if (LED[0].enabled)
         temP |= (quint32)LED[0].bright;
     if (LED[1].enabled)
-        temP |= (quint32)LED[1].bright<<6;
+        temP |= (quint32)LED[1].bright << 6;
     if (LED[2].enabled)
-        temP |= (quint32)LED[2].bright<<12;
-    //if (serialPort->open(QIODevice::ReadWrite))
-        //send_from_main(0x22, temP);
+        temP |= (quint32)LED[2].bright << 12;
+    // if (serialPort->open(QIODevice::ReadWrite))
+    // send_from_main(0x22, temP);
     if (isBleConnected())
     {
         send_from_main(0x22, temP);
@@ -1868,12 +1959,11 @@ void MainWindow::on_main_scrollLED3_valueChanged(int value)
     ui->main_labelLED3->setText(convertBrightness(LED[2].bright));
 }
 
-
 void MainWindow::on_main_checkSEP_checkStateChanged(const Qt::CheckState &arg1)
 {
     bool enabled = (arg1 == Qt::Checked);
     LEDfeatures.SepGain = enabled;
-    qDebug()<<enabled;
+    qDebug() << enabled;
     ui->main_boxGAIN2->setEnabled(enabled);
     ui->main_Cf2->setCurrentIndex(ui->main_Cf1->currentIndex());
     ui->main_Rf2->setCurrentIndex(ui->main_Rf1->currentIndex());
@@ -1883,8 +1973,8 @@ void MainWindow::on_main_checkSEP_checkStateChanged(const Qt::CheckState &arg1)
     {
         if (isBleConnected())
         {
-            send_from_main(0x20, 1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP);
-            qDebug() << "SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP <<" <<3 | " << LEDfeatures.GAIN_SEP;
+            send_from_main(0x20, 1 << 15 | (quint32)LEDfeatures.CF_SEP << 3 | (quint32)LEDfeatures.GAIN_SEP);
+            qDebug() << "SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP << " <<3 | " << LEDfeatures.GAIN_SEP;
         }
         else
         {
@@ -1893,7 +1983,7 @@ void MainWindow::on_main_checkSEP_checkStateChanged(const Qt::CheckState &arg1)
     }
     else
     {
-        //send_from_main(0x20, 0);
+        // send_from_main(0x20, 0);
         if (isBleConnected())
         {
             send_from_main(0x20, 0);
@@ -1906,7 +1996,6 @@ void MainWindow::on_main_checkSEP_checkStateChanged(const Qt::CheckState &arg1)
     }
 }
 
-
 void MainWindow::on_main_Rf1_currentIndexChanged(int index)
 {
     LEDfeatures.GAIN = index;
@@ -1917,14 +2006,13 @@ void MainWindow::on_main_Rf1_currentIndexChanged(int index)
     if (isBleConnected())
     {
         send_from_main(0x21, ((quint32)LEDfeatures.CF << 3) | (quint32)LEDfeatures.GAIN);
-        qDebug() << "RF1 changed: send 0x21, " << LEDfeatures.CF <<" <<3 | " << LEDfeatures.GAIN;
+        qDebug() << "RF1 changed: send 0x21, " << LEDfeatures.CF << " <<3 | " << LEDfeatures.GAIN;
     }
     else
     {
         qDebug() << "RF1 changed, but COM port is closed — skipping send.";
     }
 }
-
 
 void MainWindow::on_main_Cf1_currentIndexChanged(int index)
 {
@@ -1936,7 +2024,7 @@ void MainWindow::on_main_Cf1_currentIndexChanged(int index)
     if (isBleConnected())
     {
         send_from_main(0x21, ((quint32)LEDfeatures.CF << 3) | (quint32)LEDfeatures.GAIN);
-        qDebug() << "CF1 changed: send 0x21, " << LEDfeatures.CF <<" <<3 | " << LEDfeatures.GAIN;
+        qDebug() << "CF1 changed: send 0x21, " << LEDfeatures.CF << " <<3 | " << LEDfeatures.GAIN;
     }
     else
     {
@@ -1944,16 +2032,15 @@ void MainWindow::on_main_Cf1_currentIndexChanged(int index)
     }
 }
 
-
-void MainWindow::on_main_Rf2_currentIndexChanged(int index) //вызывается при 
+void MainWindow::on_main_Rf2_currentIndexChanged(int index) // вызывается при
 {
     LEDfeatures.GAIN_SEP = index;
     if (LEDfeatures.SepGain)
     {
         if (isBleConnected())
         {
-            send_from_main(0x20, 1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP);
-            qDebug() << "RF2 changed, SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP <<" <<3 | " << LEDfeatures.GAIN_SEP;
+            send_from_main(0x20, 1 << 15 | (quint32)LEDfeatures.CF_SEP << 3 | (quint32)LEDfeatures.GAIN_SEP);
+            qDebug() << "RF2 changed, SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP << " <<3 | " << LEDfeatures.GAIN_SEP;
         }
         else
         {
@@ -1962,7 +2049,7 @@ void MainWindow::on_main_Rf2_currentIndexChanged(int index) //вызываетс
     }
     else
     {
-        //send_from_main(0x20, 0);
+        // send_from_main(0x20, 0);
         if (isBleConnected())
         {
             send_from_main(0x20, 0);
@@ -1975,7 +2062,6 @@ void MainWindow::on_main_Rf2_currentIndexChanged(int index) //вызываетс
     }
 }
 
-
 void MainWindow::on_main_Cf2_currentIndexChanged(int index)
 {
     LEDfeatures.CF_SEP = index;
@@ -1983,8 +2069,8 @@ void MainWindow::on_main_Cf2_currentIndexChanged(int index)
     {
         if (isBleConnected())
         {
-            send_from_main(0x20, 1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP);
-            qDebug() << "CF2 changed, SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP <<" <<3 | " << LEDfeatures.GAIN_SEP;
+            send_from_main(0x20, 1 << 15 | (quint32)LEDfeatures.CF_SEP << 3 | (quint32)LEDfeatures.GAIN_SEP);
+            qDebug() << "CF2 changed, SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP << " <<3 | " << LEDfeatures.GAIN_SEP;
         }
         else
         {
@@ -1993,7 +2079,7 @@ void MainWindow::on_main_Cf2_currentIndexChanged(int index)
     }
     else
     {
-        //send_from_main(0x20, 0);
+        // send_from_main(0x20, 0);
         if (isBleConnected())
         {
             send_from_main(0x20, 0);
@@ -2041,7 +2127,6 @@ void MainWindow::on_verticalSlider_valueChanged(int value)
     }
 }
 
-
 void MainWindow::on_verticalSlider_2_valueChanged(int value)
 {
     ui->offset_label2->setText(QString::number(value));
@@ -2062,7 +2147,6 @@ void MainWindow::on_verticalSlider_2_valueChanged(int value)
         qDebug() << "Offset2 changed, but COM port is closed — skipping send.";
     }
 }
-
 
 void MainWindow::on_verticalSlider_3_valueChanged(int value)
 {
@@ -2085,7 +2169,6 @@ void MainWindow::on_verticalSlider_3_valueChanged(int value)
     }
 }
 
-
 void MainWindow::on_verticalSlider_4_valueChanged(int value)
 {
     ui->offset_label4->setText(QString::number(value));
@@ -2107,10 +2190,10 @@ void MainWindow::on_verticalSlider_4_valueChanged(int value)
     }
 }
 
-
 void MainWindow::on_HardReset_button_clicked()
 {
-    if (!isBleConnected()) return;
+    if (!isBleConnected())
+        return;
 
     QByteArray frame;
     frame.append(static_cast<char>(0x48));
@@ -2133,7 +2216,7 @@ void MainWindow::on_HardReset_button_clicked()
     ui->verticalSlider_2->setValue(0);
     ui->verticalSlider_3->setValue(0);
     ui->verticalSlider_4->setValue(0);
-    for (int i=0; i<3; i++)
+    for (int i = 0; i < 3; i++)
     {
         LED[i].bright = 0;
         LED[i].STC = 0;
@@ -2162,7 +2245,7 @@ void MainWindow::on_HardReset_button_clicked()
     LEDfeatures.PDNSTC = 0;
     LEDfeatures.PDNENDC = 0;
     LEDfeatures.PRF = 0;
-    for (int i=0; i<2; i++)
+    for (int i = 0; i < 2; i++)
     {
         AMB[i].STC = 0;
         AMB[i].ENDC = 0;
@@ -2179,4 +2262,3 @@ void MainWindow::on_HardReset_button_clicked()
     Offset.POL3 = 0;
     Offset.POL4 = 0;
 }
-
