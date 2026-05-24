@@ -30,6 +30,14 @@
 #include <QMainWindow>
 #include <QtSerialPort/QtSerialPort>
 #include <QSerialPortInfo>
+#include <QTcpSocket>
+#include <QBluetoothDeviceDiscoveryAgent>
+#include <QBluetoothDeviceInfo>
+#include <QBluetoothLocalDevice>
+#include <QLowEnergyController>
+#include <QLowEnergyService>
+#include <QLowEnergyCharacteristic>
+#include <QBluetoothUuid>
 #include "helpwindow.hpp"
 #include "advancedsettings.h"
 #include "qcustomplot/qcustomplot.h"
@@ -135,6 +143,18 @@ private slots:
 
     void on_HardReset_button_clicked();
 
+    // BLE slots
+    void onBleControllerConnected();
+    void onBleServiceDiscovered(const QBluetoothUuid &uuid);
+    void onBleServiceStateChanged(QLowEnergyService::ServiceState state);
+    void onBleCharacteristicChanged(const QLowEnergyCharacteristic &c, const QByteArray &value);
+    void onBleControllerDisconnected();
+
+    // TCP slots
+    void onTcpConnected();
+    void onTcpDataReady();
+    void onTcpDisconnected();
+
 signals:
     void portOpenFail();                                                                  // Emitted when cannot open port
     void portOpenOK();                                                                    // Emitted when port is open
@@ -169,13 +189,22 @@ private:
     QFile* m_csvFile = nullptr;
     void openCsvFile(void);
     void closeCsvFile(void);
-    void onSendDataRequested(QSerialPort *serialPort);
+    void onSendDataRequested();
     QByteArray makeArray(quint32 raw);
 
     QTimer updateTimer;                                                                   // Timer used for replotting the plot
     QTime timeOfFirstData;                                                                // Record the time of the first data point
     double timeBetweenSamples;                                                            // Store time between samples
-    QSerialPort *serialPort;                                                              // Serial port; runs in this thread
+    QSerialPort *serialPort = nullptr;
+
+    // ── BLE ──────────────────────────────────────────────────────────────────
+    QLowEnergyController           *bleController = nullptr;
+    QLowEnergyService              *nusService    = nullptr;
+    QLowEnergyCharacteristic        nusRxChar;
+
+    static const QBluetoothUuid NUS_SERVICE_UUID;
+    static const QBluetoothUuid NUS_TX_UUID;
+    static const QBluetoothUuid NUS_RX_UUID;
     QString receivedData;                                                                 // Used for reading from the port
     QByteArray receivedBytes;
     QByteArray rxBuffer; // накопительный буфер для бинарного потока
@@ -188,7 +217,14 @@ private:
     void enable_com_controls (bool enable);                                               // Enable/disable controls
     void setupPlot();                                                                     // Setup the QCustomPlot
                                                                                           // Open the inside serial port with these parameters
-    void openPort(QSerialPortInfo portInfo, int baudRate, QSerialPort::DataBits dataBits, QSerialPort::Parity parity, QSerialPort::StopBits stopBits);
+    void connectBLE(const QBluetoothDeviceInfo &device);
+    void bleWrite(const QByteArray &data);
+    bool isBleConnected() const;
+    void processData(const QByteArray &data);
+    void connectTCP(const QString &host, quint16 port);
+
+    // ── TCP ──────────────────────────────────────────────────────────────────
+    QTcpSocket *tcpSocket = nullptr;
     bool busy = false;
     int need_calculate_number = 0;
     int idx_ = 0;

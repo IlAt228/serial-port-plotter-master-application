@@ -27,6 +27,10 @@
 #include "mainwindow.hpp"
 #include "ui_mainwindow.h"
 #include "LEDManager.h"
+
+const QBluetoothUuid MainWindow::NUS_SERVICE_UUID{QString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")};
+const QBluetoothUuid MainWindow::NUS_TX_UUID     {QString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")};
+const QBluetoothUuid MainWindow::NUS_RX_UUID     {QString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")};
 //#include <x86intrin.h>
 
 /**
@@ -229,10 +233,7 @@ MainWindow::~MainWindow()
 {
     closeCsvFile();
       
-    if (serialPort != nullptr)
-      {
-        delete serialPort;
-      }
+    if (bleController) bleController->disconnectFromDevice();
     delete ui;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -252,20 +253,12 @@ void MainWindow::onTimeout()
  */
 void MainWindow::createUI()
 {
-    /* Check if there are any ports at all; if not, disable controls and return */
-    if (QSerialPortInfo::availablePorts().size() == 0)
-      {
-        enable_com_controls (false);
-        ui->statusBar->showMessage ("No ports detected.");
-        ui->savePNGButton->setEnabled (false);
-        return;
-      }
-
-    /* List all available serial ports and populate ports combo box */
-    for (QSerialPortInfo port : QSerialPortInfo::availablePorts())
-      {
-        ui->comboPort->addItem (port.portName());
-      }
+    /* Python BLE bridge mode — no BLE scan needed */
+    ui->comboPort->clear();
+    ui->comboPort->addItem("localhost");
+    enable_com_controls(true);
+    ui->savePNGButton->setEnabled(false);
+    ui->statusBar->showMessage("Run ble_bridge.py, then select 'localhost' and click Connect.");
 
     /* Populate baud rate combo box with standard rates */
     ui->comboBaud->addItem ("1200");
@@ -401,30 +394,177 @@ void MainWindow::enable_com_controls (bool enable)
  * @param stopBits
  */
 
-void MainWindow::openPort (QSerialPortInfo portInfo, int baudRate, QSerialPort::DataBits dataBits, QSerialPort::Parity parity, QSerialPort::StopBits stopBits)
+// ── BLE helpers ───────────────────────────────────────────────────────────────
+
+bool MainWindow::isBleConnected() const
 {
-    serialPort = new QSerialPort(portInfo, nullptr);                                            // Create a new serial port
+    if (tcpSocket && tcpSocket->state() == QAbstractSocket::ConnectedState)
+        return true;
+    return nusRxChar.isValid();
+}
 
-    connect (this, SIGNAL(portOpenOK()), this, SLOT(portOpenedSuccess()));                 // Connect port signals to GUI slots
-    connect (this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
-    connect (this, SIGNAL(portClosed()), this, SLOT(onPortClosed()));
-    connect (this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
-    connect (serialPort, SIGNAL(readyRead()), this, SLOT(readData()));
-
-    connect (this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
-
-    if (serialPort->open (QIODevice::ReadWrite))
-    {
-        serialPort->setBaudRate (baudRate);
-        serialPort->setParity (parity);
-        serialPort->setDataBits (dataBits);
-        serialPort->setStopBits (stopBits);
-        emit portOpenOK();
+void MainWindow::bleWrite(const QByteArray &data)
+{
+    if (tcpSocket && tcpSocket->state() == QAbstractSocket::ConnectedState) {
+        tcpSocket->write(data);
+        return;
     }
-    else
-    {
-        emit portOpenedFail();
-        qDebug() << serialPort->errorString();
+    if (!nusService || !nusRxChar.isValid()) return;
+    nusService->writeCharacteristic(nusRxChar, data, QLowEnergyService::WriteWithoutResponse);
+}
+
+// ── TCP ───────────────────────────────────────────────────────────────────────
+
+void MainWindow::connectTCP(const QString &host, quint16 port)
+{
+    connect(this, SIGNAL(portOpenOK()),  this, SLOT(portOpenedSuccess()));
+    connect(this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
+    connect(this, SIGNAL(portClosed()),  this, SLOT(onPortClosed()));
+    connect(this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
+    connect(this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
+
+    if (tcpSocket) { tcpSocket->deleteLater(); tcpSocket = nullptr; }
+    tcpSocket = new QTcpSocket(this);
+    connect(tcpSocket, &QTcpSocket::connected,    this, &MainWindow::onTcpConnected);
+    connect(tcpSocket, &QTcpSocket::readyRead,    this, &MainWindow::onTcpDataReady);
+    connect(tcpSocket, &QTcpSocket::disconnected, this, &MainWindow::onTcpDisconnected);
+    connect(tcpSocket, &QAbstractSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+        ui->statusBar->showMessage("TCP: " + tcpSocket->errorString());
+        emit portOpenFail();
+    });
+
+    ui->statusBar->showMessage(QString("TCP: connecting to %1:%2 ...").arg(host).arg(port));
+    tcpSocket->connectToHost(host, port);
+}
+
+void MainWindow::onTcpConnected()
+{
+    ui->statusBar->showMessage("TCP: connected to Python bridge!");
+    emit portOpenOK();
+}
+
+void MainWindow::onTcpDataReady()
+{
+    processData(tcpSocket->readAll());
+}
+
+void MainWindow::onTcpDisconnected()
+{
+    if (connected) {
+        emit portClosed();
+        ui->statusBar->showMessage("TCP: disconnected!");
+        connected = false;
+        plotting  = false;
+        ui->actionConnect->setEnabled(true);
+        ui->actionPause_Plot->setEnabled(false);
+        ui->actionDisconnect->setEnabled(false);
+        enable_com_controls(true);
+    }
+    tcpSocket->deleteLater();
+    tcpSocket = nullptr;
+}
+
+// ── BLE connect / service discovery ──────────────────────────────────────────
+
+void MainWindow::connectBLE(const QBluetoothDeviceInfo &device)
+{
+    connect(this, SIGNAL(portOpenOK()),  this, SLOT(portOpenedSuccess()));
+    connect(this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
+    connect(this, SIGNAL(portClosed()),  this, SLOT(onPortClosed()));
+    connect(this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
+    connect(this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
+
+    if (bleController) {
+        bleController->disconnectFromDevice();
+        delete bleController;
+        bleController = nullptr;
+    }
+
+    QBluetoothLocalDevice localDev;
+    bleController = QLowEnergyController::createCentral(device, localDev.address(), this);
+    connect(bleController, &QLowEnergyController::connected,
+            this, &MainWindow::onBleControllerConnected);
+    connect(bleController, &QLowEnergyController::serviceDiscovered,
+            this, &MainWindow::onBleServiceDiscovered);
+    connect(bleController, &QLowEnergyController::disconnected,
+            this, &MainWindow::onBleControllerDisconnected);
+    connect(bleController, &QLowEnergyController::errorOccurred,
+            this, [this](QLowEnergyController::Error err) {
+                ui->statusBar->showMessage(QString("BLE error code: %1").arg((int)err));
+                qDebug() << "BLE errorOccurred:" << (int)err;
+                emit portOpenFail();
+            });
+
+    ui->statusBar->showMessage("BLE: connecting...");
+    bleController->connectToDevice();
+
+    // Timeout: if not connected in 15s — reset and let user retry
+    QTimer::singleShot(15000, this, [this]() {
+        if (!isBleConnected() && !connected) {
+            ui->statusBar->showMessage("BLE: timeout. Click Connect to retry.");
+            if (bleController) bleController->disconnectFromDevice();
+            nusRxChar = QLowEnergyCharacteristic();
+            enable_com_controls(true);
+        }
+    });
+}
+
+void MainWindow::onBleControllerConnected()
+{
+    ui->statusBar->showMessage("BLE: discovering services...");
+    bleController->discoverServices();
+}
+
+void MainWindow::onBleServiceDiscovered(const QBluetoothUuid &uuid)
+{
+    if (uuid != NUS_SERVICE_UUID) return;
+
+    if (nusService) { delete nusService; nusService = nullptr; }
+
+    nusService = bleController->createServiceObject(uuid, this);
+    connect(nusService, &QLowEnergyService::stateChanged,
+            this, &MainWindow::onBleServiceStateChanged);
+    connect(nusService, &QLowEnergyService::characteristicChanged,
+            this, &MainWindow::onBleCharacteristicChanged);
+    nusService->discoverDetails();
+}
+
+void MainWindow::onBleServiceStateChanged(QLowEnergyService::ServiceState state)
+{
+    if (state != QLowEnergyService::RemoteServiceDiscovered) return;
+
+    auto txChar = nusService->characteristic(NUS_TX_UUID);
+    nusRxChar   = nusService->characteristic(NUS_RX_UUID);
+
+    // Subscribe to notifications from ESP32
+    auto desc = txChar.descriptor(
+        QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
+    if (desc.isValid())
+        nusService->writeDescriptor(desc, QByteArray::fromHex("0100"));
+
+    emit portOpenOK();
+}
+
+void MainWindow::onBleCharacteristicChanged(const QLowEnergyCharacteristic &c,
+                                             const QByteArray &value)
+{
+    Q_UNUSED(c)
+    processData(value);
+}
+
+void MainWindow::onBleControllerDisconnected()
+{
+    nusRxChar = QLowEnergyCharacteristic();
+    if (connected) {
+        emit portClosed();
+        ui->statusBar->showMessage("BLE: disconnected!");
+        connected = false;
+        plotting  = false;
+        ui->actionConnect->setEnabled(true);
+        ui->actionPause_Plot->setEnabled(false);
+        ui->actionDisconnect->setEnabled(false);
+        ui->actionRecord_stream->setEnabled(true);
+        enable_com_controls(true);
     }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -442,12 +582,10 @@ void MainWindow::onPortClosed()
     //--
     closeCsvFile();
     
-    disconnect (serialPort, SIGNAL(readyRead()), this, SLOT(readData()));
-    disconnect (this, SIGNAL(portOpenOK()), this, SLOT(portOpenedSuccess()));             // Disconnect port signals to GUI slots
+    disconnect (this, SIGNAL(portOpenOK()),  this, SLOT(portOpenedSuccess()));
     disconnect (this, SIGNAL(portOpenFail()), this, SLOT(portOpenedFail()));
-    disconnect (this, SIGNAL(portClosed()), this, SLOT(onPortClosed()));
+    disconnect (this, SIGNAL(portClosed()),  this, SLOT(onPortClosed()));
     disconnect (this, SIGNAL(newData(QStringList)), this, SLOT(onNewDataArrived(QStringList)));
-  
     disconnect (this, SIGNAL(newData(QStringList)), this, SLOT(saveStream(QStringList)));
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -458,8 +596,7 @@ void MainWindow::onPortClosed()
  */
 void MainWindow::on_comboPort_currentIndexChanged (const QString &arg1)
 {
-    QSerialPortInfo selectedPort (arg1);                                                   // Dislplay info for selected port
-    ui->statusBar->showMessage (selectedPort.description());
+    Q_UNUSED(arg1)
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -492,8 +629,9 @@ void MainWindow::portOpenedSuccess()
  */
 void MainWindow::portOpenedFail()
 {
-    //qDebug() << "Port cannot be open signal received!";
-    ui->statusBar->showMessage ("Cannot open port!");
+    ui->statusBar->showMessage("BLE: connection failed. Try again.");
+    nusRxChar = QLowEnergyCharacteristic();
+    enable_com_controls(true);
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -863,8 +1001,11 @@ void MainWindow::readData()
 //бинарный поток
 void MainWindow::readData()
 {
-    // читаем всё, что есть
-    QByteArray data = serialPort->readAll();
+    // not used in BLE mode — data arrives via onBleCharacteristicChanged → processData()
+}
+
+void MainWindow::processData(const QByteArray &data)
+{
     if (data.isEmpty()) return;
 
     // для отладки можно показывать HEX-приём (раскомментировать при надобности)
@@ -1142,55 +1283,7 @@ void MainWindow::on_actionConnect_triggered()
     }
     else
     {
-        /* If application is not connected, connect */
-        /* Get parameters from controls first */
-        QSerialPortInfo portInfo (ui->comboPort->currentText());                          // Temporary object, needed to create QSerialPort
-        int baudRate = ui->comboBaud->currentText().toInt();                              // Get baud rate from combo box
-        int dataBitsIndex = ui->comboData->currentIndex();                                // Get index of data bits combo box
-        int parityIndex = ui->comboParity->currentIndex();                                // Get index of parity combo box
-        int stopBitsIndex = ui->comboStop->currentIndex();                                // Get index of stop bits combo box
-        QSerialPort::DataBits dataBits;
-        QSerialPort::Parity parity;
-        QSerialPort::StopBits stopBits;
-
-        /* Set data bits according to the selected index */
-        switch (dataBitsIndex)
-        {
-        case 0:
-            dataBits = QSerialPort::Data8;
-            break;
-        default:
-            dataBits = QSerialPort::Data7;
-        }
-
-        /* Set parity according to the selected index */
-        switch (parityIndex)
-        {
-        case 0:
-            parity = QSerialPort::NoParity;
-            break;
-        case 1:
-            parity = QSerialPort::OddParity;
-            break;
-        default:
-            parity = QSerialPort::EvenParity;
-        }
-
-        /* Set stop bits according to the selected index */
-        switch (stopBitsIndex)
-        {
-        case 0:
-            stopBits = QSerialPort::OneStop;
-            break;
-        default:
-            stopBits = QSerialPort::TwoStop;
-        }
-
-        /* Use local instance of QSerialPort; does not crash */
-        serialPort = new QSerialPort (portInfo, nullptr);
-
-        /* Open serial port and connect its signals */
-        openPort (portInfo, baudRate, dataBits, parity, stopBits);
+        connectTCP("127.0.0.1", 12345);
     }
 }
 
@@ -1235,24 +1328,27 @@ void MainWindow::on_actionDisconnect_triggered()
 {
   if (connected)
     {
-      serialPort->close();                                                              // Close serial port
-      emit portClosed();                                                                // Notify application
-      delete serialPort;                                                                // Delete the pointer
-      serialPort = nullptr;                                                                // Assign NULL to dangling pointer
+      nusRxChar = QLowEnergyCharacteristic(); // invalidate before disconnect to suppress onBleControllerDisconnected UI update
+      if (bleController)
+          bleController->disconnectFromDevice();
+      if (tcpSocket) {
+          tcpSocket->disconnectFromHost();
+          tcpSocket->deleteLater();
+          tcpSocket = nullptr;
+      }
 
-      ui->statusBar->showMessage ("Disconnected!");
+      emit portClosed();
 
-      connected = false;                                                                // Set connected status flag to false
-      ui->actionConnect->setEnabled (true);
-
-      plotting = false;                                                                 // Not plotting anymore
-      ui->actionPause_Plot->setEnabled (false);
-      ui->actionDisconnect->setEnabled (false);
+      ui->statusBar->showMessage("Disconnected!");
+      connected = false;
+      ui->actionConnect->setEnabled(true);
+      plotting  = false;
+      ui->actionPause_Plot->setEnabled(false);
+      ui->actionDisconnect->setEnabled(false);
       ui->actionRecord_stream->setEnabled(true);
-      receivedData.clear();                                                             // Clear received string
-
-      ui->savePNGButton->setEnabled (false);
-      enable_com_controls (true);
+      receivedData.clear();
+      ui->savePNGButton->setEnabled(false);
+      enable_com_controls(true);
     }
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1504,9 +1600,8 @@ void MainWindow::on_actionSettings_triggered()
 
 }
 
-void MainWindow::onSendDataRequested(QSerialPort *serialPort)
+void MainWindow::onSendDataRequested()
 {
-
 }
 
 QByteArray MainWindow::makeArray(quint32 raw) //LSB first
@@ -1523,49 +1618,20 @@ QByteArray MainWindow::makeArray(quint32 raw) //LSB first
 
 void MainWindow::on_actionSend_triggered()
 {
-    QString portName = ui->comboPort->currentText();
-    int baudRate = ui->comboBaud->currentText().toInt();
-
-    if (!serialPort) {
-        serialPort = new QSerialPort(this);
-    }
-
-    if (serialPort->isOpen())
-        serialPort->close();
-
-    ui->statusBar->showMessage ("Updating...");
-
-    serialPort->setPortName(portName);
-    serialPort->setBaudRate(baudRate);
-    serialPort->setDataBits(QSerialPort::Data8);
-    serialPort->setParity(QSerialPort::NoParity);
-    serialPort->setStopBits(QSerialPort::OneStop);
-    serialPort->setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!serialPort->open(QIODevice::ReadWrite)) {
-        qDebug() << "Не удалось открыть порт:" << serialPort->errorString();
-        ui->statusBar->showMessage("Ошибка открытия порта!");
+    if (!isBleConnected()) {
+        ui->statusBar->showMessage("BLE: not connected — cannot send configuration.");
         return;
     }
 
-    ui->statusBar->showMessage("Порт открыт для передачи!");
+    ui->statusBar->showMessage("BLE: sending configuration...");
 
-
-    QByteArray pack;
     auto sendCmd = [&](uint8_t addr, uint32_t val) {
         QByteArray frame;
         frame.append(static_cast<char>(addr));
         frame.append(makeArray(val));
         qDebug() << "FRAME: " << addr << " " << val;
-        for (int i=0; i<4; i++)
-        {
-            serialPort->write(&frame[i], 1);
-            serialPort->flush();
-            //QThread::usleep(5000); // короткая пауза
-        }
-
-        serialPort->waitForBytesWritten(10);
-        //QThread::usleep(50000); // короткая пауза
+        bleWrite(frame);
+        QThread::msleep(10);
     };
 
     sendCmd(0x00,0x08); //0
@@ -1675,19 +1741,7 @@ void MainWindow::on_actionSend_triggered()
     else
         sendCmd(0x3D, 0); //40
     sendCmd(0x3A, full_offset()); //41
-    serialPort->close();                                                              // Close serial port
-    emit portClosed();                                                                // Notify application
-    delete serialPort;                                                                // Delete the pointer
-    serialPort = nullptr;                                                                // Assign NULL to dangling pointer
-
-    ui->statusBar->showMessage ("Disconnected!");
-    ui->actionConnect->setEnabled (true);
-
-    receivedData.clear();                                                             // Clear received string
-
-    enable_com_controls (true);
-
-    ui->statusBar->showMessage ("Update completed!");
+    ui->statusBar->showMessage("BLE: configuration sent!");
 }
 void MainWindow::updateFromSettings()
 {
@@ -1742,7 +1796,7 @@ void MainWindow::on_main_scrollLED1_valueChanged(int value)
         temP |= (quint32)LED[1].bright<<6;
     if (LED[2].enabled)
         temP |= (quint32)LED[2].bright<<12;
-    if (serialPort && serialPort->isOpen() )
+    if (isBleConnected())
     {
         send_from_main(0x22, temP);
         qDebug() << "LED1 brightness changed ";
@@ -1756,19 +1810,12 @@ void MainWindow::on_main_scrollLED1_valueChanged(int value)
 
 void MainWindow::send_from_main(uint8_t addr, uint32_t val)
 {
-        QByteArray frame;
-        frame.append(static_cast<char>(0x44));
-        frame.append(static_cast<char>(addr));
-        frame.append(makeArray(val));
-        qDebug() << frame;
-        for (int i=0; i<5; i++)
-        {
-            serialPort->write(&frame[i], 1);
-            serialPort->flush();
-            QThread::usleep(5000); // короткая пауза
-        }
-        serialPort->waitForBytesWritten(10);
-        QThread::usleep(5000); // короткая пауза
+    QByteArray frame;
+    frame.append(static_cast<char>(0x44));
+    frame.append(static_cast<char>(addr));
+    frame.append(makeArray(val));
+    qDebug() << frame;
+    bleWrite(frame);
 }
 
 
@@ -1783,7 +1830,7 @@ void MainWindow::on_main_scrollLED2_valueChanged(int value)
         temP |= (quint32)LED[1].bright<<6;
     if (LED[2].enabled)
         temP |= (quint32)LED[2].bright<<12;
-    if (serialPort && serialPort->isOpen() )
+    if (isBleConnected())
     {
         send_from_main(0x22, temP);
         qDebug() << "LED2 brightness changed ";
@@ -1809,7 +1856,7 @@ void MainWindow::on_main_scrollLED3_valueChanged(int value)
         temP |= (quint32)LED[2].bright<<12;
     //if (serialPort->open(QIODevice::ReadWrite))
         //send_from_main(0x22, temP);
-    if (serialPort && serialPort->isOpen() )
+    if (isBleConnected())
     {
         send_from_main(0x22, temP);
         qDebug() << "LED3 brightness changed ";
@@ -1834,7 +1881,7 @@ void MainWindow::on_main_checkSEP_checkStateChanged(const Qt::CheckState &arg1)
     ui->main_Cf2->setEnabled(enabled);
     if (LEDfeatures.SepGain)
     {
-        if (serialPort && serialPort->isOpen() )
+        if (isBleConnected())
         {
             send_from_main(0x20, 1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP);
             qDebug() << "SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP <<" <<3 | " << LEDfeatures.GAIN_SEP;
@@ -1847,7 +1894,7 @@ void MainWindow::on_main_checkSEP_checkStateChanged(const Qt::CheckState &arg1)
     else
     {
         //send_from_main(0x20, 0);
-        if (serialPort && serialPort->isOpen() )
+        if (isBleConnected())
         {
             send_from_main(0x20, 0);
             qDebug() << "SEP=disabled: send 0x20, 0 ";
@@ -1867,7 +1914,7 @@ void MainWindow::on_main_Rf1_currentIndexChanged(int index)
     {
         ui->main_Rf2->setCurrentIndex(ui->main_Rf1->currentIndex());
     }
-    if (serialPort && serialPort->isOpen() )
+    if (isBleConnected())
     {
         send_from_main(0x21, ((quint32)LEDfeatures.CF << 3) | (quint32)LEDfeatures.GAIN);
         qDebug() << "RF1 changed: send 0x21, " << LEDfeatures.CF <<" <<3 | " << LEDfeatures.GAIN;
@@ -1886,7 +1933,7 @@ void MainWindow::on_main_Cf1_currentIndexChanged(int index)
     {
         ui->main_Cf2->setCurrentIndex(ui->main_Cf1->currentIndex());
     }
-    if (serialPort && serialPort->isOpen() )
+    if (isBleConnected())
     {
         send_from_main(0x21, ((quint32)LEDfeatures.CF << 3) | (quint32)LEDfeatures.GAIN);
         qDebug() << "CF1 changed: send 0x21, " << LEDfeatures.CF <<" <<3 | " << LEDfeatures.GAIN;
@@ -1903,7 +1950,7 @@ void MainWindow::on_main_Rf2_currentIndexChanged(int index) //вызываетс
     LEDfeatures.GAIN_SEP = index;
     if (LEDfeatures.SepGain)
     {
-        if (serialPort && serialPort->isOpen() )
+        if (isBleConnected())
         {
             send_from_main(0x20, 1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP);
             qDebug() << "RF2 changed, SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP <<" <<3 | " << LEDfeatures.GAIN_SEP;
@@ -1916,7 +1963,7 @@ void MainWindow::on_main_Rf2_currentIndexChanged(int index) //вызываетс
     else
     {
         //send_from_main(0x20, 0);
-        if (serialPort && serialPort->isOpen() )
+        if (isBleConnected())
         {
             send_from_main(0x20, 0);
             qDebug() << "RF2 changed, SEP=disabled: send 0x20, 0 ";
@@ -1934,7 +1981,7 @@ void MainWindow::on_main_Cf2_currentIndexChanged(int index)
     LEDfeatures.CF_SEP = index;
     if (LEDfeatures.SepGain)
     {
-        if (serialPort && serialPort->isOpen())
+        if (isBleConnected())
         {
             send_from_main(0x20, 1<<15 |(quint32)LEDfeatures.CF_SEP <<3 | (quint32)LEDfeatures.GAIN_SEP);
             qDebug() << "CF2 changed, SEP=enabled: send 0x20, 1<<15 | " << LEDfeatures.CF_SEP <<" <<3 | " << LEDfeatures.GAIN_SEP;
@@ -1947,7 +1994,7 @@ void MainWindow::on_main_Cf2_currentIndexChanged(int index)
     else
     {
         //send_from_main(0x20, 0);
-        if (serialPort && serialPort->isOpen())
+        if (isBleConnected())
         {
             send_from_main(0x20, 0);
             qDebug() << "CF2 changed, SEP=disabled: send 0x20, 0 ";
@@ -1983,7 +2030,7 @@ void MainWindow::on_verticalSlider_valueChanged(int value)
     Offset.LED1 = abs(value);
     qDebug() << "POL_1: " << Offset.POL1;
     qDebug() << "LED_1: " << Offset.LED1;
-    if (serialPort && serialPort->isOpen())
+    if (isBleConnected())
     {
         send_from_main(0x3A, full_offset());
         qDebug() << "Offset1 changed: send 0x20, " << full_offset();
@@ -2005,7 +2052,7 @@ void MainWindow::on_verticalSlider_2_valueChanged(int value)
     Offset.LED2 = abs(value);
     qDebug() << "POL_2: " << Offset.POL2;
     qDebug() << "LED_2: " << Offset.LED2;
-    if (serialPort && serialPort->isOpen())
+    if (isBleConnected())
     {
         send_from_main(0x3A, full_offset());
         qDebug() << "Offset2 changed: send 0x20, " << full_offset();
@@ -2027,7 +2074,7 @@ void MainWindow::on_verticalSlider_3_valueChanged(int value)
     Offset.LED3 = abs(value);
     qDebug() << "POL_3: " << Offset.POL3;
     qDebug() << "LED_3: " << Offset.LED3;
-    if (serialPort && serialPort->isOpen())
+    if (isBleConnected())
     {
         send_from_main(0x3A, full_offset());
         qDebug() << "Offset3 changed: send 0x20, " << full_offset();
@@ -2049,7 +2096,7 @@ void MainWindow::on_verticalSlider_4_valueChanged(int value)
     Offset.AMB1 = abs(value);
     qDebug() << "POL_4: " << Offset.POL1;
     qDebug() << "AMB_1: " << Offset.AMB1;
-    if (serialPort && serialPort->isOpen())
+    if (isBleConnected())
     {
         send_from_main(0x3A, full_offset());
         qDebug() << "Offset_AMB changed: send 0x20, " << full_offset();
@@ -2063,36 +2110,12 @@ void MainWindow::on_verticalSlider_4_valueChanged(int value)
 
 void MainWindow::on_HardReset_button_clicked()
 {
-    /*hardReset = true;
+    if (!isBleConnected()) return;
+
     QByteArray frame;
     frame.append(static_cast<char>(0x48));
-    QString portName = ui->comboPort->currentText();
-    int baudRate = ui->comboBaud->currentText().toInt();
+    bleWrite(frame);
 
-    if (!serialPort) {
-        serialPort = new QSerialPort(this);
-    }
-
-    if (serialPort->isOpen())
-        serialPort->close();
-
-    ui->statusBar->showMessage ("Updating...");
-
-    serialPort->setPortName(portName);
-    serialPort->setBaudRate(baudRate);
-    serialPort->setDataBits(QSerialPort::Data8);
-    serialPort->setParity(QSerialPort::NoParity);
-    serialPort->setStopBits(QSerialPort::OneStop);
-    serialPort->setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!serialPort->open(QIODevice::ReadWrite)) {
-        qDebug() << "Не удалось открыть порт:" << serialPort->errorString();
-        ui->statusBar->showMessage("Ошибка открытия порта!");
-        return;
-    }
-    serialPort->write(&frame[0], 1);
-    serialPort->flush();
-    QThread::usleep(5000); // короткая пауза
     ui->main_boxGAIN1->setEnabled(false);
     ui->main_boxGAIN2->setEnabled(false);
     ui->main_boxLED1->setEnabled(false);
@@ -2155,18 +2178,5 @@ void MainWindow::on_HardReset_button_clicked()
     Offset.POL2 = 0;
     Offset.POL3 = 0;
     Offset.POL4 = 0;
-    hardReset = false;
-    serialPort->close();                                                              // Close serial port
-    emit portClosed();                                                                // Notify application
-    delete serialPort;                                                                // Delete the pointer
-    serialPort = nullptr;                                                                // Assign NULL to dangling pointer
-
-    ui->statusBar->showMessage ("Disconnected!");
-    ui->actionConnect->setEnabled (true);
-
-    receivedData.clear();                                                             // Clear received string
-
-    enable_com_controls (true);
-    */
 }
 

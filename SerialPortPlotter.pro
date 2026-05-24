@@ -5,8 +5,8 @@
 #-------------------------------------------------
 
 QT       += core gui
-QT       += serialport
-CONFIG += c++11
+QT       += serialport bluetooth network
+CONFIG += c++17
 
 #QT += core gui serialport printsupport widgets
 
