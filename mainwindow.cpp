@@ -95,12 +95,8 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     double amplitude = maxValue - minValue;
-    qDebug() << "[HR] amplitude=" << amplitude << "maxValue=" << maxValue << "minValue=" << minValue;
     if (amplitude < 100)
-    {
-        qDebug() << "[HR] rejected: amplitude too small";
         return 0;
-    }
 
     // Порог — верхние 30% диапазона (работает и для инвертированного сигнала)
     double threshold = minValue + 0.7 * amplitude;
@@ -124,12 +120,8 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     // 4. Расчет ЧСС по последним пикам
-    qDebug() << "[HR] peaks found:" << peaks.size() << peaks;
     if (peaks.size() < 2)
-    {
-        qDebug() << "[HR] rejected: not enough peaks";
         return 0;
-    }
 
     // Рассчитываем средний интервал между пиками (RR-интервал)
     double avgRRInterval = 0;
@@ -161,6 +153,41 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     return static_cast<int>(qRound(heartRate));
+}
+
+double calculateSpO2(std::vector<int>& red, std::vector<int>& ir, int count)
+{
+    if (count < 20) return 0;
+
+    // DC = среднее за всё окно
+    double dc_red = 0, dc_ir = 0;
+    for (int i = 0; i < count; i++) {
+        dc_red += red[i];
+        dc_ir  += ir[i];
+    }
+    dc_red /= count;
+    dc_ir  /= count;
+    if (std::abs(dc_red) < 1 || std::abs(dc_ir) < 1) return 0;
+
+    // AC = RMS отклонения от глобального среднего (не используем скользящее среднее —
+    // его окно ~1 с совпадает с периодом пульса и гасит сигнал)
+    double rms_red = 0, rms_ir = 0;
+    for (int i = 0; i < count; i++) {
+        double ar = red[i] - dc_red;
+        double ai = ir[i]  - dc_ir;
+        rms_red += ar * ar;
+        rms_ir  += ai * ai;
+    }
+    rms_red = std::sqrt(rms_red / count);
+    rms_ir  = std::sqrt(rms_ir  / count);
+
+    if (rms_ir < 1) return 0;
+
+    double R = (rms_red / std::abs(dc_red)) / (rms_ir / std::abs(dc_ir));
+    // Коэффициенты подобраны эмпирически — нужна калибровка с референсным пульсоксиметром
+    double spo2 = 110.0 - 25.0 * R;
+
+    return R;
 }
 
 /**
@@ -221,6 +248,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
 
     data_vector.assign(3, std::vector<double>(30));
     green_samples.resize(80);
+    red_samples.resize(80);
+    ir_samples.resize(80);
 
     /* Wheel over plot when plotting */
     connect(ui->plot, SIGNAL(mouseWheel(QWheelEvent *)), this, SLOT(on_mouse_wheel_in_plot(QWheelEvent *)));
@@ -286,6 +315,10 @@ void MainWindow::createUI()
     m_heartRateLabel = new QLabel("HR: --  ", this);
     m_heartRateLabel->setStyleSheet("color: #fb4934; font-weight: bold; padding-right: 6px;");
     ui->statusBar->addPermanentWidget(m_heartRateLabel);
+
+    m_spo2Label = new QLabel("SpO2: --  ", this);
+    m_spo2Label->setStyleSheet("color: #83a598; font-weight: bold; padding-right: 6px;");
+    ui->statusBar->addPermanentWidget(m_spo2Label);
 
     /* Populate baud rate combo box with standard rates */
     ui->comboBaud->addItem("1200");
@@ -1151,22 +1184,30 @@ void MainWindow::processData(const QByteArray &data)
         if (0 <= green_idx_ && green_idx_ < 80)
         {
             green_samples[green_idx_] = incomingData[2].toDouble();
+            red_samples[green_idx_]   = incomingData[0].toDouble();
+            ir_samples[green_idx_]    = incomingData[1].toDouble();
             green_idx_++;
-            if (green_idx_ % 10 == 0)
-                qDebug() << "[HR] collecting, green_idx_=" << green_idx_
-                         << "last sample=" << green_samples[green_idx_-1];
         }
 
         if (green_idx_ == 80)
         {
-            auto heart_rate = calculateHeartRate(green_samples, 80, 10);
-            qDebug() << "[HR] calculateHeartRate returned:" << heart_rate;
             green_idx_ = 0;
-            if (m_heartRateLabel) {
-                if (heart_rate > 0)
-                    m_heartRateLabel->setText(QString("HR: %1 bpm  ").arg(heart_rate));
-                else
-                    m_heartRateLabel->setText("HR: --  ");
+
+            int heart_rate = calculateHeartRate(green_samples, 80, 10);
+            if (m_heartRateLabel)
+                m_heartRateLabel->setText(heart_rate > 0
+                    ? QString("HR: %1 bpm  ").arg(heart_rate)
+                    : "HR: --  ");
+
+            double R = calculateSpO2(red_samples, ir_samples, 80);
+            if (m_spo2Label) {
+                if (R > 0 && R < 5.0) {
+                    double spo2 = qBound(70.0, 113.0 - 5.0 * R, 100.0);
+                    m_spo2Label->setText(QString("SpO2: %1%  ").arg(spo2, 0, 'f', 0));
+                } else if (R <= 0) {
+                    m_spo2Label->setText("SpO2: --  ");
+                }
+                // R >= 5: артефакт движения — оставляем предыдущее значение
             }
         }
 

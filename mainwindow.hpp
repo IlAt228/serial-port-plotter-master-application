@@ -235,8 +235,11 @@ private:
     std::vector<std::vector<double>> data_vector;
 
     std::vector<int> green_samples;
+    std::vector<int> red_samples;
+    std::vector<int> ir_samples;
     int green_idx_ = -1;
     QLabel *m_heartRateLabel = nullptr;
+    QLabel *m_spo2Label = nullptr;
 };
 
 
