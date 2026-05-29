@@ -45,6 +45,13 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     if (sampleCount < 50 || samplingRate <= 0)
         return 0;
 
+    // Если среднее отрицательное или слишком маленькое — датчик в воздухе
+    double dcMean = 0;
+    for (int i = 0; i < sampleCount; i++) dcMean += irSamples[i];
+    dcMean /= sampleCount;
+    if (dcMean < 10000)
+        return 0;
+
     // 1. Предварительная фильтрация: скользящее среднее для подавления высокочастотных шумов
     QVector<double> filteredSignal(sampleCount);
     const int filterWindowSize = 3; // Небольшое окно для сохранения формы сигнала
@@ -95,7 +102,7 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     }
 
     double amplitude = maxValue - minValue;
-    if (amplitude < 100)
+    if (amplitude < 5000)
         return 0;
 
     // Порог — верхние 30% диапазона (работает и для инвертированного сигнала)
@@ -141,51 +148,46 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     // Преобразуем в ЧСС (уд/мин)
     double heartRate = 60.0 / rrIntervalSeconds;
 
-    // Проверка на физиологически возможные значения
-    if (heartRate < 40.0)
-    {
-        // return 0;
-    }
-
-    if (heartRate > 200.0)
-    {
-        // return 0;
-    }
+    if (heartRate < 40.0 || heartRate > 200.0)
+        return 0;
 
     return static_cast<int>(qRound(heartRate));
 }
 
-double calculateSpO2(std::vector<int>& red, std::vector<int>& ir, int count)
+double calculateSpO2(std::vector<int> &red, std::vector<int> &ir, int count)
 {
-    if (count < 20) return 0;
+    if (count < 20)
+        return 0;
 
     // DC = среднее за всё окно
     double dc_red = 0, dc_ir = 0;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count; i++)
+    {
         dc_red += red[i];
-        dc_ir  += ir[i];
+        dc_ir += ir[i];
     }
     dc_red /= count;
-    dc_ir  /= count;
-    if (std::abs(dc_red) < 1 || std::abs(dc_ir) < 1) return 0;
+    dc_ir /= count;
+    if (std::abs(dc_red) < 1 || std::abs(dc_ir) < 1)
+        return 0;
 
     // AC = RMS отклонения от глобального среднего (не используем скользящее среднее —
     // его окно ~1 с совпадает с периодом пульса и гасит сигнал)
     double rms_red = 0, rms_ir = 0;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count; i++)
+    {
         double ar = red[i] - dc_red;
-        double ai = ir[i]  - dc_ir;
+        double ai = ir[i] - dc_ir;
         rms_red += ar * ar;
-        rms_ir  += ai * ai;
+        rms_ir += ai * ai;
     }
     rms_red = std::sqrt(rms_red / count);
-    rms_ir  = std::sqrt(rms_ir  / count);
+    rms_ir = std::sqrt(rms_ir / count);
 
-    if (rms_ir < 1) return 0;
+    if (rms_ir < 1)
+        return 0;
 
     double R = (rms_red / std::abs(dc_red)) / (rms_ir / std::abs(dc_ir));
-    // Коэффициенты подобраны эмпирически — нужна калибровка с референсным пульсоксиметром
-    double spo2 = 110.0 - 25.0 * R;
 
     return R;
 }
@@ -247,9 +249,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
     timer->start(100); // Запуск таймера с интервалом 100 мс
 
     data_vector.assign(3, std::vector<double>(30));
-    green_samples.resize(80);
-    red_samples.resize(80);
-    ir_samples.resize(80);
+    green_samples.resize(120);
+    red_samples.resize(120);
+    ir_samples.resize(120);
+    amb_samples.resize(120);
 
     /* Wheel over plot when plotting */
     connect(ui->plot, SIGNAL(mouseWheel(QWheelEvent *)), this, SLOT(on_mouse_wheel_in_plot(QWheelEvent *)));
@@ -1171,7 +1174,10 @@ void MainWindow::processData(const QByteArray &data)
             incomingData << QString::number(val);
         }
 
-        qDebug() << "nvals = " << nvals;
+        // вычитаем ambient из всех трёх LED каналов
+        int amb = incomingData[3].toInt();
+        for (int k = 0; k < 3; ++k)
+            incomingData[k] = QString::number(incomingData[k].toInt() - amb);
 
         // выводим в окно (если нужно) и эмитим сигнал
         int sz = 7;
@@ -1181,33 +1187,75 @@ void MainWindow::processData(const QByteArray &data)
             data_vector[ii][idx_] = incomingData[ii].toDouble();
         }
 
-        if (0 <= green_idx_ && green_idx_ < 80)
+        if (0 <= green_idx_ && green_idx_ < 120)
         {
             green_samples[green_idx_] = incomingData[2].toDouble();
-            red_samples[green_idx_]   = incomingData[0].toDouble();
-            ir_samples[green_idx_]    = incomingData[1].toDouble();
+            red_samples[green_idx_] = incomingData[0].toDouble();
+            ir_samples[green_idx_] = incomingData[1].toDouble();
+            if (incomingData.size() >= 4)
+                amb_samples[green_idx_] = incomingData[3].toDouble();
             green_idx_++;
         }
 
-        if (green_idx_ == 80)
+        if (green_idx_ == 120)
         {
             green_idx_ = 0;
 
-            int heart_rate = calculateHeartRate(green_samples, 80, 10);
-            if (m_heartRateLabel)
-                m_heartRateLabel->setText(heart_rate > 0
-                    ? QString("HR: %1 bpm  ").arg(heart_rate)
-                    : "HR: --  ");
+            // Motion artifact detection via ambient channel variance
+            bool motion = false;
+            double amb_mean = 0;
+            for (int i = 0; i < 120; i++)
+                amb_mean += amb_samples[i];
+            amb_mean /= 120;
+            double amb_var = 0;
+            for (int i = 0; i < 120; i++)
+            {
+                double d = amb_samples[i] - amb_mean;
+                amb_var += d * d;
+            }
+            amb_var /= 120;
+            // Threshold: std dev > 5% of mean indicates motion
+            if (std::abs(amb_mean) > 1 && std::sqrt(amb_var) > std::abs(amb_mean) * 0.05)
+                motion = true;
+            qDebug() << "[AMB] mean=" << amb_mean << "stddev=" << std::sqrt(amb_var) << "motion=" << motion;
 
-            double R = calculateSpO2(red_samples, ir_samples, 80);
-            if (m_spo2Label) {
-                if (R > 0 && R < 5.0) {
-                    double spo2 = qBound(70.0, 113.0 - 5.0 * R, 100.0);
-                    m_spo2Label->setText(QString("SpO2: %1%  ").arg(spo2, 0, 'f', 0));
-                } else if (R <= 0) {
-                    m_spo2Label->setText("SpO2: --  ");
+            int heart_rate = calculateHeartRate(green_samples, 120, 40);
+            if (m_heartRateLabel)
+            {
+                if (heart_rate > 0)
+                {
+                    m_zeroHRCount = 0;
+                    m_smoothedHR = (m_smoothedHR == 0) ? heart_rate : 0.4 * heart_rate + 0.6 * m_smoothedHR;
+                    m_heartRateLabel->setText(QString("HR: %1 bpm  ").arg(qRound(m_smoothedHR)));
                 }
-                // R >= 5: артефакт движения — оставляем предыдущее значение
+                else
+                {
+                    if (++m_zeroHRCount >= 2)
+                    {
+                        m_smoothedHR = 0;
+                        m_heartRateLabel->setText("HR: --  ");
+                    }
+                }
+            }
+
+            if (!motion)
+            {
+                double R = calculateSpO2(red_samples, ir_samples, 120);
+                if (m_spo2Label)
+                {
+                    if (R > 0 && R < 5.0)
+                    {
+                        m_smoothedR = (m_smoothedR == 0) ? R : 0.4 * R + 0.6 * m_smoothedR;
+                        double spo2 = qBound(70.0, 113.0 - 5.0 * m_smoothedR, 100.0);
+                        m_spo2Label->setText(QString("SpO2: %1%  ").arg(spo2, 0, 'f', 0));
+                    }
+                    else if (R <= 0)
+                    {
+                        m_smoothedR = 0;
+                        m_spo2Label->setText("SpO2: --  ");
+                    }
+                    // R >= 5: артефакт движения — оставляем предыдущее значение
+                }
             }
         }
 
@@ -1494,11 +1542,13 @@ void MainWindow::on_actionClear_triggered()
  */
 void MainWindow::openCsvFile(void)
 {
-    m_csvFile = new QFile(QDateTime::currentDateTime().toString("yyyy-MM-d-HH-mm-ss-") + "data-out.csv");
+    m_csvFile = new QFile(QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") + "_AFE4404.csv");
     if (!m_csvFile)
         return;
     if (!m_csvFile->open(QIODevice::ReadWrite | QIODevice::Text))
         return;
+    QTextStream out(m_csvFile);
+    out << "Timestamp_ms,LED1_Red,LED2_IR,LED3_Green,AMB\n";
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -1528,10 +1578,9 @@ void MainWindow::saveStream(QStringList newData)
     if (ui->actionRecord_stream->isChecked())
     {
         QTextStream out(m_csvFile);
-        foreach (const QString &str, newData)
-        {
-            out << str << ",";
-        }
+        out << QDateTime::currentMSecsSinceEpoch();
+        for (const QString &str : newData)
+            out << "," << str;
         out << "\n";
     }
 }
