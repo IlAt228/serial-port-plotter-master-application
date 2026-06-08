@@ -187,7 +187,8 @@ private:
     QStringList     channelStrList;
 
     //-- CSV file to save data
-    QFile* m_csvFile = nullptr;
+    QFile*   m_csvFile      = nullptr;
+    QString  m_csvStartTime;               // время начала записи для имени файла
     void openCsvFile(void);
     void closeCsvFile(void);
     void onSendDataRequested();

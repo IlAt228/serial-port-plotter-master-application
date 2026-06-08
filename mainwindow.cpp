@@ -31,8 +31,9 @@
 const QBluetoothUuid MainWindow::NUS_SERVICE_UUID{QString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")};
 const QBluetoothUuid MainWindow::NUS_TX_UUID{QString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")};
 const QBluetoothUuid MainWindow::NUS_RX_UUID{QString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")};
+const int WindowsSize = 500;
+const int Frecueincy = 100;
 // #include <x86intrin.h>
-
 /**
  * @brief Вычисление частоты сердечных сокращений (ЧСС) из данных AFE4404
  * @param irSamples Массив значений с ИК канала AFE4404 (940 нм)
@@ -47,7 +48,8 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
 
     // Если среднее отрицательное или слишком маленькое — датчик в воздухе
     double dcMean = 0;
-    for (int i = 0; i < sampleCount; i++) dcMean += irSamples[i];
+    for (int i = 0; i < sampleCount; i++)
+        dcMean += irSamples[i];
     dcMean /= sampleCount;
     if (dcMean < 10000)
         return 0;
@@ -55,7 +57,6 @@ int calculateHeartRate(std::vector<int> irSamples, int sampleCount, float sampli
     // 1. Предварительная фильтрация: скользящее среднее для подавления высокочастотных шумов
     QVector<double> filteredSignal(sampleCount);
     const int filterWindowSize = 3; // Небольшое окно для сохранения формы сигнала
-
     for (int i = filterWindowSize / 2; i < sampleCount - filterWindowSize / 2; ++i)
     {
         double sum = 0;
@@ -203,9 +204,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
                                           line_colors{
                                               /* For channel data (gruvbox palette) */
                                               /* Light */
+                                              QColor("#8ec07c"), //("#fabd2f"), //G
                                               QColor("#fb4934"), // R
                                               QColor("#fabd2f"), //("#b8bb26"), //IR
-                                              QColor("#8ec07c"), //("#fabd2f"), //G
                                               QColor("#83a598"), // Ambient
                                               QColor("#d3869b"),
                                               QColor("#8ec07c"),
@@ -249,10 +250,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
     timer->start(100); // Запуск таймера с интервалом 100 мс
 
     data_vector.assign(3, std::vector<double>(30));
-    green_samples.resize(120);
-    red_samples.resize(120);
-    ir_samples.resize(120);
-    amb_samples.resize(120);
+    green_samples.resize(WindowsSize);
+    red_samples.resize(WindowsSize);
+    ir_samples.resize(WindowsSize);
+    amb_samples.resize(WindowsSize);
 
     /* Wheel over plot when plotting */
     connect(ui->plot, SIGNAL(mouseWheel(QWheelEvent *)), this, SLOT(on_mouse_wheel_in_plot(QWheelEvent *)));
@@ -1187,39 +1188,39 @@ void MainWindow::processData(const QByteArray &data)
             data_vector[ii][idx_] = incomingData[ii].toDouble();
         }
 
-        if (0 <= green_idx_ && green_idx_ < 120)
+        if (0 <= green_idx_ && green_idx_ < WindowsSize)
         {
-            green_samples[green_idx_] = incomingData[2].toDouble();
-            red_samples[green_idx_] = incomingData[0].toDouble();
-            ir_samples[green_idx_] = incomingData[1].toDouble();
+            green_samples[green_idx_] = incomingData[0].toDouble();
+            red_samples[green_idx_] = incomingData[1].toDouble();
+            ir_samples[green_idx_] = incomingData[2].toDouble();
             if (incomingData.size() >= 4)
                 amb_samples[green_idx_] = incomingData[3].toDouble();
             green_idx_++;
         }
 
-        if (green_idx_ == 120)
+        if (green_idx_ == WindowsSize)
         {
             green_idx_ = 0;
 
             // Motion artifact detection via ambient channel variance
             bool motion = false;
             double amb_mean = 0;
-            for (int i = 0; i < 120; i++)
+            for (int i = 0; i < WindowsSize; i++)
                 amb_mean += amb_samples[i];
-            amb_mean /= 120;
+            amb_mean /= WindowsSize;
             double amb_var = 0;
-            for (int i = 0; i < 120; i++)
+            for (int i = 0; i < WindowsSize; i++)
             {
                 double d = amb_samples[i] - amb_mean;
                 amb_var += d * d;
             }
-            amb_var /= 120;
+            amb_var /= WindowsSize;
             // Threshold: std dev > 5% of mean indicates motion
             if (std::abs(amb_mean) > 1 && std::sqrt(amb_var) > std::abs(amb_mean) * 0.05)
                 motion = true;
             qDebug() << "[AMB] mean=" << amb_mean << "stddev=" << std::sqrt(amb_var) << "motion=" << motion;
 
-            int heart_rate = calculateHeartRate(green_samples, 120, 40);
+            int heart_rate = calculateHeartRate(green_samples, WindowsSize, Frecueincy);
             if (m_heartRateLabel)
             {
                 if (heart_rate > 0)
@@ -1240,7 +1241,7 @@ void MainWindow::processData(const QByteArray &data)
 
             if (!motion)
             {
-                double R = calculateSpO2(red_samples, ir_samples, 120);
+                double R = calculateSpO2(red_samples, ir_samples, WindowsSize);
                 if (m_spo2Label)
                 {
                     if (R > 0 && R < 5.0)
@@ -1542,7 +1543,9 @@ void MainWindow::on_actionClear_triggered()
  */
 void MainWindow::openCsvFile(void)
 {
-    m_csvFile = new QFile(QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") + "_AFE4404.csv");
+    m_csvStartTime = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    m_csvFile = new QFile(QString("C:/serial_port_plotter-master/Result_Excel/") +
+                          m_csvStartTime + "_TEMP.csv");
     if (!m_csvFile)
         return;
     if (!m_csvFile->open(QIODevice::ReadWrite | QIODevice::Text))
@@ -1560,9 +1563,14 @@ void MainWindow::closeCsvFile(void)
 {
     if (!m_csvFile)
         return;
+    QString oldPath = m_csvFile->fileName();
     m_csvFile->close();
-    if (m_csvFile)
-        delete m_csvFile;
+    // Переименовываем: "начало_конец.csv"
+    QString endTime = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    QString newPath = QString("C:/serial_port_plotter-master/Result Excel/") +
+                      m_csvStartTime + "_" + endTime + ".csv";
+    QFile::rename(oldPath, newPath);
+    delete m_csvFile;
     m_csvFile = nullptr;
 }
 /** ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -1650,13 +1658,13 @@ void MainWindow::on_pushButton_AutoScale_clicked()
 void MainWindow::calculate(double value1, double value2, double value3)
 {
     ui->textEdit_UartWindow->append("calculate");
-    qDebug() << "calculate! : " << value1 << " " << value2 << " " << value3 << "\n";
+    // qDebug() << "calculate! : " << value1 << " " << value2 << " " << value3 << "\n";
     if (need_calculate_number == 3)
     {
-        qDebug() << "need3\n";
+        // qDebug() << "need3\n";
         if (value3 > 1e6)
         {
-            qDebug() << "need3 > 1e6\n";
+            // qDebug() << "need3 > 1e6\n";
             green_idx_ = -1;
             Offset.POL3 = 1;
             if (Offset.LED3 == 15)
@@ -1671,7 +1679,7 @@ void MainWindow::calculate(double value1, double value2, double value3)
         }
         else if (value3 < 0)
         {
-            qDebug() << "need3 < 0\n";
+            // qDebug() << "need3 < 0\n";
             green_idx_ = -1;
             LED[2].bright = 9;
             Offset.LED3 = 1;
@@ -1679,7 +1687,7 @@ void MainWindow::calculate(double value1, double value2, double value3)
         }
         else
         {
-            qDebug() << "need3 next\n";
+            // qDebug() << "need3 next\n";
             need_calculate_number--;
         }
     }
@@ -1832,7 +1840,7 @@ void MainWindow::on_actionSend_triggered()
         QByteArray frame;
         frame.append(static_cast<char>(addr));
         frame.append(makeArray(val));
-        qDebug() << "FRAME: " << addr << " " << val;
+        // qDebug() << "FRAME: " << addr << " " << val;
         bleWrite(frame);
         QThread::msleep(10);
     };
